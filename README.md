@@ -137,7 +137,7 @@ Finally restart the **xinetd** service:
 
 PHP should be configured to recognise the **mg_php** extension.  The PHP configuration file (**php.ini**) is usually found in the following locations:
 
-###UNIX:
+### UNIX
 
        /usr/local/lib/php.ini
 
@@ -149,7 +149,7 @@ Finally, install the **mg_php.so** file in the PHP modules directory, which is u
 
        /usr/local/lib/php/extensions/[version_information]/
 
-###Windows:
+### Windows
 
        C:\Windows\php.ini
 
