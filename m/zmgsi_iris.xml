@@ -1,6 +1,6 @@
-Cache for Windows^INT^MGSQL
-%RO on 16 Jan 2020 01:00 AM
-%zmgsi
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26" zv="IRIS for UNIX (Ubuntu Server LTS for x86-64 Containers) 2019.4 (Build 379U)" ts="2020-01-16 09:00:00">
+<Routine name="%zmgsi" type="INT" languagemode="0" timestamp="65394,61137"><![CDATA[
 %zmgsi ;(CM) Service Integration - Core Server
  ;
  ;  ----------------------------------------------------------------------------
@@ -326,8 +326,10 @@ ylink ; link all routines
  zlink "_zmgsis.m"
  q
  ;
+]]></Routine>
 
-%zmgsis
+
+<Routine name="%zmgsis" type="INT" languagemode="0" timestamp="65394,61137"><![CDATA[
 %zmgsis ;(CM) Service Integration - Child Process
  ;
  ;  ----------------------------------------------------------------------------
@@ -2100,6 +2102,5 @@ sqldel(id,params) ; Delete SQL result set
  k ^mgsqls($j,id)
  q ""
  ;
-
-
-
+]]></Routine>
+</Export>
