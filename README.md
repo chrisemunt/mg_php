@@ -57,7 +57,7 @@ There are built Windows x64 binaries available from:
 
 Having created a suitable development environment, the PHP Extension installer can be used to build and deploy **mg\_php**.  You will find the setup scripts in the /src directory of the distribution.
 
-UNIX:
+####UNIX:
 
 Invoke the following commands from the /src directory (i.e. the directory containing **config.m4** file).
 
@@ -66,7 +66,7 @@ Invoke the following commands from the /src directory (i.e. the directory contai
        make
        make install
 
-Windows:
+####Windows:
 
 Building **mg\_php** for Windows from source is more involved.  Having successfully built PHP from source, create a directory called **mg\_php** underneath the **/ext** directory of PHP distribution.  Typically, this will be something like:
 
@@ -74,7 +74,7 @@ Building **mg\_php** for Windows from source is more involved.  Having successfu
 
 Now, copy the contents of the **mg\_php** **/src** directory to that location.  The **...\ext\mg\_php** will now contain the **mg\_php** source code together with the **config.w32** file.  Open the appropriate Visual Studio Developer command Window (i.e. x86 or x64) and change directory to the root of the PHP source tree.  For example: 
 
-       C:\php-sdk\phpdev\vc15\x64\php-7.4.2-src\ext\mg_php\
+       C:\php-sdk\phpdev\vc15\x64\php-7.4.2-src\
 
 Set the essential variables for the build environment by invoking:
 
@@ -376,7 +376,7 @@ Example:
       
 Example:
 
-       $result = m_delete(0, "^Person", 1);
+       $result = m_delete("^Person", 1);
 
 
 #### Check whether a record is defined (m\_defined or m\_data)
