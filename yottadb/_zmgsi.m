@@ -3,7 +3,7 @@
  ;  ----------------------------------------------------------------------------
  ;  | %zmgsi                                                                    |
  ;  | Author: Chris Munt cmunt@mgateway.com, chris.e.munt@gmail.com            |
- ;  | Copyright (c) 2016-2019 M/Gateway Developments Ltd,                      |
+ ;  | Copyright (c) 2016-2020 M/Gateway Developments Ltd,                      |
  ;  | Surrey UK.                                                               |
  ;  | All rights reserved.                                                     |
  ;  |                                                                          |
@@ -20,7 +20,8 @@
  ;  | WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. |
  ;  | See the License for the specific language governing permissions and      |
  ;  | limitations under the License.                                           |
- ;  ---------------------------------------------------------------------------- ;
+ ;  ----------------------------------------------------------------------------
+ ;
 a0 d vers^%zmgsis
  q
  ;
@@ -169,5 +170,10 @@ dinte ; probably a namespace/uci error
  d event^%zmgsis("unable to start a child process: "_$$error^%zmgsis())
  s txt="error# "_$$error^%zmgsis()
  k res s res="" s res(1)="00000cv"_$c(10),maxlen=$$getslen^%zmgsis() d send^%zmgsis(txt)
+ q
+ ;
+ylink ; link all routines
+ ;;zlink "_zmgsi.m"
+ zlink "_zmgsis.m"
  q
  ;

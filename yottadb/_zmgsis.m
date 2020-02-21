@@ -3,7 +3,7 @@
  ;  ----------------------------------------------------------------------------
  ;  | %zmgsis                                                                  |
  ;  | Author: Chris Munt cmunt@mgateway.com, chris.e.munt@gmail.com            |
- ;  | Copyright (c) 2016-2019 M/Gateway Developments Ltd,                      |
+ ;  | Copyright (c) 2016-2020 M/Gateway Developments Ltd,                      |
  ;  | Surrey UK.                                                               |
  ;  | All rights reserved.                                                     |
  ;  |                                                                          |
@@ -23,9 +23,6 @@
  ;  ----------------------------------------------------------------------------
  ;
 a0 d vers q
- ;f i=1:1:1000000 s x=$$esize(.y,i,62),z=$$dsize(y,$l(y),62) w !,i,?10,y,?20,z
- ;f i=1:1:10000000 s x=$$wsehead(i,7),z=$$wsdhead(x,.y) w !,i,?10,x,?20,z,?30,y
- q
  ;
  ; v2.0.6:   17 February  2009
  ; v2.0.7:    1 July      2009
@@ -37,12 +34,16 @@ a0 d vers q
  ; v2.3.13:   3 February  2019 (Add all-out to xdbc)
  ; v2.3.14:  18 March     2019 (Release as Open Source, Apache v2 license)
  ; v3.0.1:   13 June      2019 (Renamed to %zmgsi and %zmgsis)
+ ; v3.1.2:   10 September 2019 (add protocol upgrade for mg_dba library - Go)
+ ; v3.2.3:    1 November  2019 (add SQL interface)
+ ; v3.2.4:    8 January   2020 (Add support for $increment to old protocol)
+ ; v3.2.5:   17 January   2020 (Finalise the ifc interface)
  ;
 v() ; version and date
  n v,r,d
- s v="3.0"
- s r=1
- s d="13 June 2019"
+ s v="3.2"
+ s r=5
+ s d="17 January 2020"
  q v_"."_r_"."_d
  ;
 vers ; version information
@@ -130,6 +131,17 @@ dbase62(nxx) ; decode single digit (up to) base-62 number
  i x'<97,x<123 q ((x-97)+36)
  q ""
  ;
+esize256(dsize) ; create little-endian 32-bit unsigned integer from M decimal
+ q $c(dsize#256)_$c(((dsize\256)#256))_$c(((dsize\(256**2))#256))_$c(((dsize\(256**3))#256))
+ n esize
+ s esize=+dsize f  q:$l(esize)=4  s esize="0"_esize
+ q esize
+ ;
+dsize256(esize) ; convert little-endian 32-bit unsigned integer to M decimal
+ q ($a(esize,4)*(256**3))+($a(esize,3)*(256**2))+($a(esize,2)*256)+$a(esize,1)
+ s dsize=+esize
+ q dsize
+ ;
 ehead(head,size,byref,type)
  n slen,hlen
  s slen=$$esize(.esize,size,10)
@@ -203,10 +215,11 @@ inetde ; error
  w $$error()
  q
  ;
-ifc(ctx,request,null1,null2,null3,null4,null5) ; entry point from fixed binding
+ifc(ctx,request,param) ; entry point from fixed binding
  n %zcs,clen,hlen,result,rlen,abyref,anybyref,argc,array,buf,byref,cmnd,dakey,darec,ddata,deod,eod,esize,extra,fun,global,hlen,maxlen,mqinfo,nato,offset,ok,oversize,pcmnd,rdxbuf,rdxptr,rdxrlen,rdxsize,ref,refn,mreq1,req,req1,req2,req3,res,size,sl,slen,sn,sysp,type,uci,var,version,x
  new $ztrap set $ztrap="zgoto "_$zlevel_":ifce^%zmgsis"
  d vars
+ i param["$zv" q $zv
  s %zcs("ifc")=1
  s argc=1,array=0,nato=0
  k ^%zmg("mpc",$j),^mgsi($j)
@@ -239,14 +252,14 @@ ifce ; error
 ifct ; ifc test
  k
  s req=$$ifct1()
- s res=$$ifc(0,req,"","","","","")
+ s res=$$ifc(0,req,"")
  q
  ;
 ifct1() ; test data
  n
  d vars
- s server="localhost",uci="",vers="1.1.1",smeth=0,cmnd="s"
- s req="phpp^p^"_server_"#"_uci_"#0###"_vers_"#"_smeth_"^"_cmnd_"^00000"_$c(10)
+ s server="localhost",uci="",vers="1.1.1",smeth=0,cmnd="S"
+ s req="PHPp^P^"_server_"#"_uci_"#0###"_vers_"#"_smeth_"^"_cmnd_"^00000"_$c(10)
  s hlen=$l(req)
  ;
  s data="cm",size=$l(data),byref=0,type=ddata
@@ -308,10 +321,11 @@ child3 ; read request
  i x=0 d halt ; client disconnect
  i buf="xDBC" g main^%mgsqln
  i buf?1u.e1"HTTP/"1n1"."1n1c s buf=buf_$c(10) g main^%mgsqlw
+ i $e(buf,1,4)="dbx1" d dbx^%zmgsis(buf) g halt
  s type=0,byref=0 d req1 s @var=buf
  s cmnd=$p(buf,"^",2)
  s hlen=$l(buf),clen=0
- i cmnd="P" s clen=$$dsize($e(buf,hlen-(5-1),hlen),5,62) ;s ^cm($i(^cm))=$e(buf,hlen-(5-1),hlen)
+ i cmnd="P" s clen=$$dsize($e(buf,hlen-(5-1),hlen),5,62)
  s %zcs("client")=$e(buf,4)
  ;d event("request cmnd="_cmnd_"; size="_clen_" ("_$e(buf,hlen-(5-1),hlen)_"); client="_%zcs("client")_" ;header = "_buf)
  s rlen=0
@@ -808,6 +822,7 @@ php ; serve request from m_client
  i cmnd="D" d data
  i cmnd="O" d order
  i cmnd="P" d previous
+ i cmnd="I" d increment
  i cmnd="M" d mergedb
  i cmnd="m" d mergephp
  i cmnd="H" d html
@@ -883,6 +898,14 @@ previous ; global reverse order
  d res
  q
  ;
+increment ; Global increment
+ i argc<3 q
+ s argz=argc-1
+ s fun=0 d ref
+ x "s res=$i("_ref_","_"req"_argc_")"
+ d res
+ Q
+ ;
 mergedb ; global merge from m_client
  i argc<3 q
  s a="" f argz=1:1 q:'$d(req(argz))  i $g(req(argz,0))=1 s a=req(argz) q
@@ -922,8 +945,8 @@ htmlm ; html (cos) method
  s argz=argc
  s fun=0 d oref
  s ref=$tr($p(ref,",",1,2),".","")_","_$p(ref,",",3,999)
- i argc=1 x "n ("_refn_") s req(-1)=$zobjclassmethod()"
- i argc>1 x "n ("_refn_") s req(-1)=$zobjclassmethod("_ref_")"
+ i argc=1 x "n ("_refn_") s req(-1)=$ClassMethod()"
+ i argc>1 x "n ("_refn_") s req(-1)=$ClassMethod("_ref_")"
  s res=$g(req(-1))
  q
  ;
@@ -1102,18 +1125,18 @@ proc ; m extrinsic function
 meth ; m (cos) method
  ;
  ; synopsis:
- ; s err=$zobjclassmethod(classname,methodname,param1,...,paramn)
+ ; s err=$ClassMethod(classname,methodname,param1,...,paramn)
  ;
  ; s classname="extc.domapi"
  ; s methodname="opendom"
- ; s err=$zobjclassmethod(classname,methodname)
+ ; s err=$ClassMethod(classname,methodname)
  ;
  ; ; this is equivalent to ...
  ; s err=##class(extc.domapi).opendom()
  ; 
  ; s methodname="getdocumentnode"
  ; s documentname="extcdom2"
- ; s err=$zobjclassmethod(classname,methodname,documentname)
+ ; s err=$ClassMethod(classname,methodname,documentname)
  ; ; this is equivalent to ...
  ; s err=##class(extc.domapi).getdocumentnode("extcdom2")
  ;
@@ -1121,8 +1144,8 @@ meth ; m (cos) method
  s argz=argc
  s fun=1 d oref
  s ref=$tr($p(ref,",",1,2),".","")_","_$p(ref,",",3,999)
- i argc=1 x "n ("_refn_") s req(-1)=$zobjclassmethod()"
- i argc>1 x "n ("_refn_") s req(-1)=$zobjclassmethod("_ref_")"
+ i argc=1 x "n ("_refn_") s req(-1)=$ClassMethod()"
+ i argc>1 x "n ("_refn_") s req(-1)=$ClassMethod("_ref_")"
  s res=$g(req(-1))
  d res
  q
@@ -1137,6 +1160,7 @@ ref ; global reference
  s a1=$g(@req(2))
  s strt=2 i a1?1"^"."^" s strt=strt+1
  s ref=@req(strt) i argc=strt q
+ i strt'<argz q
  s ref=ref_"("
  s com="" f i=strt+1:1:argz s refn=refn_","_req(i),ref=ref_com_$s(fun:".",1:"")_req(i),com=","
  s ref=ref_")"
@@ -1381,4 +1405,148 @@ checkunpw(username,password)
  i username1'=username d event("access violation: bad username") q 0
  i password1'=password d event("access violation: bad password") q 0
  q 1
+ ;
+sst(%0) ; save symbol table
+ new $ztrap set $ztrap="zgoto "_$zlevel_":sste^%zmgsis"
+ n %
+ k @%0
+ s %0=$e(%0,1,$l(%0)-1)
+ s %="%" f  s %=$o(@%) q:%=""  i %'="%0" m @(%0_",%)")=@%
+ q 1
+sste ; error
+ q 0
+ ;
+dbx(buf) ; new wire protocol for access to M
+ n %oref,abyref,argc,array,cmnd,conc,dakey,darec,ddata,deod,extra,global,i,maxlen,mqinfo,nato,offset,ok,oref,oversize,pcmnd,port,pport,rdxbuf,rdxptr,rdxrlen,rdxsize,req,res,sl,slen,sn,sort,type,uci,var,version,x
+ s uci=$p(buf,"~",2)
+ i uci'="" d uci(uci)
+ s res=$zv
+ s res=$$esize256($l(res))_"0"_res
+ w res d flush
+dbx1 ; test
+ r head#5
+ s len=$$dsize256(head)
+ s len=len-5
+ s cmnd=$e(head,5)
+ r data#len
+ s obufsize=$$dsize256($e(data,1,4))
+ s idx=$$dsize256($e(data,6,9))
+ k %r s offset=11 f %r=1:1:64 s %r(%r,0)=$$dsize256($e(data,offset,offset+3)) d  i '$d(%r(%r)) s %r=%r-1 q
+ . s %r(%r,1)=$a(data,offset+4)\20,%r(%r,2)=$a(data,offset+4)#20 i %r(%r,1)=9 k %r(%r) q
+ . s %r(%r)=$e(data,offset+5,offset+5+(%r(%r,0)-1))
+ . s offset=offset+5+%r(%r,0)
+ . q
+ s rc=$$dbxcmnd(.%r,.%oref,$a(cmnd),.res)
+ i rc=0 s sort=1 ; data
+ i rc=-1 s sort=11 ; error
+ s type=1 ; string
+ s res=$$esize256($l(res))_$c((sort*20)+type)_res
+ w res d flush
+ g dbx1
+ ;
+dbxcmnd(%r,%oref,cmnd,res) ; Execute command
+ new $ztrap set $ztrap="zgoto "_$zlevel_":dbxcmnde^%zmgsis"
+ n buf,data,head,idx,len,obufsize,offset,rc,uci
+ s res=""
+ i cmnd=2 s res=0 q 0
+ i cmnd=3 s res=$$getuci() q 0
+ i cmnd=4 d uci(%r(1)) s res=$$getuci() q 0
+ i cmnd=11 s @(%r(1)_$$dbxref(.%r,2,%r-1,0))=%r(%r),res=0 q 0
+ i cmnd=12 s res=$g(@(%r(1)_$$dbxref(.%r,2,%r,0))) q 0
+ i cmnd=13 s res=$o(@(%r(1)_$$dbxref(.%r,2,%r,0))) q 0
+ i cmnd=14 s res=$o(@(%r(1)_$$dbxref(.%r,2,%r,0)),-1) q 0
+ i cmnd=15 k @(%r(1)_$$dbxref(.%r,2,%r,0)) s res=0 q 0
+ i cmnd=16 s res=$d(@(%r(1)_$$dbxref(.%r,2,%r,0))) q 0
+ i cmnd=17 s res=$i(@(%r(1)_$$dbxref(.%r,2,%r-1,0)),%r(%r)) q 0
+ i cmnd=31 s res=$$dbxfun(.%r,"$$"_%r(1)_"("_$$dbxref(.%r,2,%r,1)_")") q 0
+ s res="<SYNTAX>"
+ q -1
+dbxcmnde ; Error
+ s ze=$$error()
+ q -1
+ ;
+dbxref(%r,strt,end,ctx) ; Generate reference
+ n i,ref,com
+ s ref="",com="" f i=strt:1:end s ref=ref_com_"%r("_i_")",com=","
+ i ctx=0,ref'="" s ref="("_ref_")"
+ q ref
+ ;
+dbxfun(%r,fun) ; Execute function
+ n %oref,%uci,a,buf,cmnd,data,head,idx,len,obufsize,offset,oref,rc,res,sort,type,uci
+ s @("res="_fun)
+ q res
+ ;
+dbxcmeth(%r,cmeth) ; Execute function
+ n %oref,%uci,a,buf,cmnd,data,head,idx,len,obufsize,offset,oref,rc,res,sort,type,uci
+ s @("res=$ClassMethod("_cmeth_")")
+ q res
+ ;
+dbxmeth(%r,meth) ; Execute function
+ n %oref,%uci,a,buf,cmnd,data,head,idx,len,obufsize,offset,oref,rc,res,sort,type,uci
+ s @("res=$Method("_meth_")")
+ q res
+ ;
+ ; s x=$$sqleisc^%zmgsis(0,"SELECT * FROM SQLUser.customer","")
+sqleisc(id,sql,params) ; Execute InterSystems SQL query
+ new $ztrap set $ztrap="zgoto "_$zlevel_":sqleisce^%zmgsis"
+ n %objlasterror,result,error,data,status,tsql,cn,col,rset,rn,n,sort,type
+ k ^mgsqls($j,id)
+ s result="0",error="",data="",cn=0
+ s error="InterSystems SQL not available with YottaDB" g sqleisce1
+ s sort=1,type=1,result=$$esize256($l(cn))_$c((sort*20)+type)_cn_data
+ q $$esize256($l(result))_result
+sqleisce ; M error
+ s error=$$error()
+sqleisce1 ; SQL error
+ s sort=11,type=1,result=$$esize256($l(error))_$c((sort*20)+type)_error
+ q $$esize256($l(result))_result
+ ;
+ ; s x=$$sqlemg^%zmgsis(0,"select * from patient","")
+sqlemg(id,sql,params) ; Execute MGSQL SQL query
+ new $ztrap set $ztrap="zgoto "_$zlevel_":sqlemge^%zmgsis"
+ n %zi,%zo,result,error,data,cn,n,col,ok,sort,type,v
+ s result="0",error="",data="",cn=0
+ s %zi("stmt")=id
+ s v=$$sqlmgv() i v="" s error="MGSQL not installed" g sqlemge1
+ s ok=$$exec^%mgsql("",sql,.%zi,.%zo)
+ i $d(%zo("error")) s error=$g(%zo("error")) g sqlemge1
+ s sort=1,type=1
+ f n=1:1 q:'$d(%zo(0,n))  s col=$g(%zo(0,n)) d
+ . i col["." s col=$p(col,".",2)
+ . s col=$tr(col,"-_.;","")
+ . i col="" s col="column_"_n
+ . s ^mgsqls($j,%zi("stmt"),0,0,n)=col
+ . s data=data_$$esize256($l(col))_$c((sort*20)+type)_col
+ . q
+ s cn=n-1
+ s sort=1,type=1,result=$$esize256($l(cn))_$c((sort*20)+type)_cn_data
+ q $$esize256($l(result))_result
+sqlemge ; M error
+ s error=$$error()
+sqlemge1 ; SQL error
+ s sort=11,type=1,result=$$esize256($l(error))_$c((sort*20)+type)_error
+ q $$esize256($l(result))_result
+ ;
+sqlmgv() ; get MGSQL version
+ new $ztrap set $ztrap="zgoto "_$zlevel_":sqlmgve^%zmgsis"
+ s v=$$v^%mgsql()
+ q v
+sqlmgve ; M error
+ q ""
+ ;
+sqlrow(id,rn,params) ; Get a row
+ n result,data,n,sort,type
+ s result=""
+ s sort=1,type=1
+ i params["-1" s:rn=0 rn="" s rn=$o(^mgsqls($j,id,0,rn),-1) i rn=0 s rn=""
+ i params["+1" s:rn="" rn=0 s rn=$o(^mgsqls($j,id,0,rn))
+ i rn="" q result
+ i '$d(^mgsqls($j,id,0,rn)) q result
+ s result=result_$$esize256($l(rn))_$c((sort*20)+type)_rn
+ f n=1:1 q:'$d(^mgsqls($j,id,0,rn,n))  s data=$g(^mgsqls($j,id,0,rn,n)),result=result_$$esize256($l(data))_$c((sort*20)+type)_data
+ q $$esize256($l(result))_result
+ ;
+sqldel(id,params) ; Delete SQL result set
+ k ^mgsqls($j,id)
+ q ""
  ;
