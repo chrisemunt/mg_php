@@ -57,7 +57,7 @@ There are built Windows x64 binaries available from:
 
 Having created a suitable development environment, the PHP Extension installer can be used to build and deploy **mg\_php**.  You will find the setup scripts in the /src directory of the distribution.
 
-####UNIX:
+#### UNIX
 
 Invoke the following commands from the /src directory (i.e. the directory containing **config.m4** file).
 
@@ -66,7 +66,7 @@ Invoke the following commands from the /src directory (i.e. the directory contai
        make
        make install
 
-####Windows:
+#### Windows
 
 Building **mg\_php** for Windows from source is more involved.  Having successfully built PHP from source, create a directory called **mg\_php** underneath the **/ext** directory of PHP distribution.  Typically, this will be something like:
 
