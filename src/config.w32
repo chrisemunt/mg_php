@@ -1,0 +1,9 @@
+// vim:ft=javascript:
+
+ARG_ENABLE("mg_php", "mg_php support", "yes");
+
+if (PHP_MG_PHP != "no") {
+	EXTENSION('mg_php', 'mg_php.c mg_dba.c');
+
+        PHP_INSTALL_HEADERS("ext/mg_php/", "php_mg_php.h mg_dba.h mg_dbasys.h");
+}
