@@ -522,8 +522,6 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 * Initial Experimental Pre-Release
 
-3.0; Revision 1 (13 June 2019)
-
 ### v3.1.56 (19 February 2020)
 
 * Initial Release
