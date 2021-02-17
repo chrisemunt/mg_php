@@ -4,7 +4,7 @@
    | Description: PHP Extension for M/Cache/IRIS                              |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2002-2020 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2002-2021 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -129,12 +129,16 @@ Version 2.1.55 7 February 2020:
    - The {{{ comment syntax used by 'genfunclist' and 'genfuncsummary' scripts that are part of the PHP documentation project.
    Upgrade the Windows Winsock Protocol version to 2.2 (was 1.1).
 
-Version 3.0.56 18 February 2020:
+Version 3.1.56 18 February 2020:
    Upgrade TCP functionality to use IPv6 infrastructure.
    Implement DNS look-ups for the Host.
    Converge code base with the standard mg_dba module.
    - Implement standard connectivity models: TCP to SIG; TCP to M; M API.
    Release as Open Source with the product name: 'mg_php'.
+
+Version 3.2.57 18 February 2021:
+   Introduce support for M transaction processing: tstart, $tlevel, tcommit, trollback.
+   Introduce support for the M increment function.
 
 */
 
@@ -441,6 +445,12 @@ static const zend_function_entry mg_functions[] =
     PHP_FE(m_data, NULL)
     PHP_FE(m_order, NULL)
     PHP_FE(m_previous, NULL)
+    PHP_FE(m_increment, NULL)
+    PHP_FE(m_tstart, NULL)
+    PHP_FE(m_tlevel, NULL)
+    PHP_FE(m_tcommit, NULL)
+    PHP_FE(m_trollback, NULL)
+    PHP_FE(m_sleep, NULL)
     PHP_FE(m_html, NULL)
     PHP_FE(m_html_method, NULL)
     PHP_FE(m_http, NULL)
@@ -1933,6 +1943,379 @@ ZEND_FUNCTION(m_previous)
    else {
       MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer + MG_RECV_HEAD, 1);
    }
+}
+/* }}} */
+
+
+/* {{{ proto string m_increment([string servername, ]string globalname, mixed keys ...)
+   Increment the value of an M global node and return the next value */
+ZEND_FUNCTION(m_increment)
+{
+   MGBUF mgbuf, *p_buf;
+   int argument_count, offset, n, len;
+   char *key = NULL;
+   char *data;
+   zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
+   int chndle;
+   MGPAGE *p_page;
+
+   p_page = MG_PHP_GLOBAL(p_page);
+
+   p_buf = &mgbuf;
+   mg_buf_init(p_buf, MG_BUFSIZE, MG_BUFSIZE);
+
+   mg_log_request(p_page, "m_increment");
+
+   /* get the number of arguments */
+   argument_count = ZEND_NUM_ARGS();
+
+   /* see if it satisfies our minimal request (1 argument) */
+   if (argument_count < 1)
+      MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+
+   /* argument count is correct, now retrieve arguments */
+   if(zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
+      MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+
+   n = mg_db_connect(p_page->p_srv, &chndle, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+
+   offset = mg_request_header_ex(p_page, p_buf, "I", MG_PRODUCT, &(parameter_array[0]));
+
+   for (n = offset; n < argument_count; n ++) {
+      data = mg_get_string(&(parameter_array[n]), NULL, &len);
+      mg_request_add(p_page->p_srv, chndle, p_buf, data, len, 0, MG_TX_DATA);
+   }
+
+   MG_MEMCHECK("Insufficient memory to process request", 1);
+
+   n = mg_db_send(p_page->p_srv, chndle, p_buf, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+   mg_db_receive(p_page->p_srv, chndle, p_buf, MG_BUFSIZE, 0);
+
+   MG_MEMCHECK("Insufficient memory to process response", 0);
+
+   mg_db_disconnect(p_page->p_srv, chndle, 1);
+
+   if ((n = mg_php_error(p_page, p_buf->p_buffer))) {
+      if (n == 2) {
+         MG_RETURN_STRING_AND_FREE_BUF(p_page->p_srv->error_code, 1);
+      }
+      MG_RETURN_FALSE_AND_FREE_BUF;
+   }
+   else {
+      MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer + MG_RECV_HEAD, 1);
+   }
+}
+/* }}} */
+
+
+/* {{{ proto string m_tstart()
+   Start a transaction */
+ZEND_FUNCTION(m_tstart)
+{
+   MGBUF mgbuf, *p_buf;
+   int argument_count, offset, n, len;
+   char *key = NULL;
+   char *data;
+   zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
+   int chndle;
+   MGPAGE *p_page;
+
+   p_page = MG_PHP_GLOBAL(p_page);
+
+   p_buf = &mgbuf;
+   mg_buf_init(p_buf, MG_BUFSIZE, MG_BUFSIZE);
+
+   mg_log_request(p_page, "m_tstart");
+
+   /* get the number of arguments */
+   argument_count = ZEND_NUM_ARGS();
+
+   if (argument_count > 0) {
+      if (zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
+          MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+   }
+
+   n = mg_db_connect(p_page->p_srv, &chndle, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+
+   offset = mg_request_header_ex(p_page, p_buf, "a", MG_PRODUCT, &(parameter_array[0]));
+
+   for (n = offset; n < argument_count; n ++) {
+      data = mg_get_string(&(parameter_array[n]), NULL, &len);
+      mg_request_add(p_page->p_srv, chndle, p_buf, data, len, 0, MG_TX_DATA);
+   }
+
+   MG_MEMCHECK("Insufficient memory to process request", 1);
+
+   n = mg_db_send(p_page->p_srv, chndle, p_buf, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+   mg_db_receive(p_page->p_srv, chndle, p_buf, MG_BUFSIZE, 0);
+
+   MG_MEMCHECK("Insufficient memory to process response", 0);
+
+   mg_db_disconnect(p_page->p_srv, chndle, 1);
+
+   if ((n = mg_php_error(p_page, p_buf->p_buffer))) {
+      if (n == 2) {
+         MG_RETURN_STRING_AND_FREE_BUF(p_page->p_srv->error_code, 1);
+      }
+      MG_RETURN_FALSE_AND_FREE_BUF;
+   }
+   else {
+      MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer + MG_RECV_HEAD, 1);
+   }
+}
+/* }}} */
+
+
+/* {{{ proto string m_tlevel()
+   Return the current transaction level */
+ZEND_FUNCTION(m_tlevel)
+{
+   MGBUF mgbuf, *p_buf;
+   int argument_count, offset, n, len;
+   char *key = NULL;
+   char *data;
+   zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
+   int chndle;
+   MGPAGE *p_page;
+
+   p_page = MG_PHP_GLOBAL(p_page);
+
+   p_buf = &mgbuf;
+   mg_buf_init(p_buf, MG_BUFSIZE, MG_BUFSIZE);
+
+   mg_log_request(p_page, "m_tlevel");
+
+   /* get the number of arguments */
+   argument_count = ZEND_NUM_ARGS();
+
+   if (argument_count > 0) {
+      if (zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
+          MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+   }
+
+   n = mg_db_connect(p_page->p_srv, &chndle, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+
+   offset = mg_request_header_ex(p_page, p_buf, "b", MG_PRODUCT, &(parameter_array[0]));
+
+   for (n = offset; n < argument_count; n ++) {
+      data = mg_get_string(&(parameter_array[n]), NULL, &len);
+      mg_request_add(p_page->p_srv, chndle, p_buf, data, len, 0, MG_TX_DATA);
+   }
+
+   MG_MEMCHECK("Insufficient memory to process request", 1);
+
+   n = mg_db_send(p_page->p_srv, chndle, p_buf, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+   mg_db_receive(p_page->p_srv, chndle, p_buf, MG_BUFSIZE, 0);
+
+   MG_MEMCHECK("Insufficient memory to process response", 0);
+
+   mg_db_disconnect(p_page->p_srv, chndle, 1);
+
+   if ((n = mg_php_error(p_page, p_buf->p_buffer))) {
+      if (n == 2) {
+         MG_RETURN_STRING_AND_FREE_BUF(p_page->p_srv->error_code, 1);
+      }
+      MG_RETURN_FALSE_AND_FREE_BUF;
+   }
+   else {
+      MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer + MG_RECV_HEAD, 1);
+   }
+}
+/* }}} */
+
+
+/* {{{ proto string m_tcommit()
+   Commit a transaction */
+ZEND_FUNCTION(m_tcommit)
+{
+   MGBUF mgbuf, *p_buf;
+   int argument_count, offset, n, len;
+   char *key = NULL;
+   char *data;
+   zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
+   int chndle;
+   MGPAGE *p_page;
+
+   p_page = MG_PHP_GLOBAL(p_page);
+
+   p_buf = &mgbuf;
+   mg_buf_init(p_buf, MG_BUFSIZE, MG_BUFSIZE);
+
+   mg_log_request(p_page, "m_tcommit");
+
+   /* get the number of arguments */
+   argument_count = ZEND_NUM_ARGS();
+
+   if (argument_count > 0) {
+      if (zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
+          MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+   }
+
+   n = mg_db_connect(p_page->p_srv, &chndle, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+
+   offset = mg_request_header_ex(p_page, p_buf, "c", MG_PRODUCT, &(parameter_array[0]));
+
+   for (n = offset; n < argument_count; n ++) {
+      data = mg_get_string(&(parameter_array[n]), NULL, &len);
+      mg_request_add(p_page->p_srv, chndle, p_buf, data, len, 0, MG_TX_DATA);
+   }
+
+   MG_MEMCHECK("Insufficient memory to process request", 1);
+
+   n = mg_db_send(p_page->p_srv, chndle, p_buf, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+   mg_db_receive(p_page->p_srv, chndle, p_buf, MG_BUFSIZE, 0);
+
+   MG_MEMCHECK("Insufficient memory to process response", 0);
+
+   mg_db_disconnect(p_page->p_srv, chndle, 1);
+
+   if ((n = mg_php_error(p_page, p_buf->p_buffer))) {
+      if (n == 2) {
+         MG_RETURN_STRING_AND_FREE_BUF(p_page->p_srv->error_code, 1);
+      }
+      MG_RETURN_FALSE_AND_FREE_BUF;
+   }
+   else {
+      MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer + MG_RECV_HEAD, 1);
+   }
+}
+/* }}} */
+
+
+/* {{{ proto string m_trollback()
+   Rollback a transaction */
+ZEND_FUNCTION(m_trollback)
+{
+   MGBUF mgbuf, *p_buf;
+   int argument_count, offset, n, len;
+   char *key = NULL;
+   char *data;
+   zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
+   int chndle;
+   MGPAGE *p_page;
+
+   p_page = MG_PHP_GLOBAL(p_page);
+
+   p_buf = &mgbuf;
+   mg_buf_init(p_buf, MG_BUFSIZE, MG_BUFSIZE);
+
+   mg_log_request(p_page, "m_trollback");
+
+   /* get the number of arguments */
+   argument_count = ZEND_NUM_ARGS();
+
+   if (argument_count > 0) {
+      if (zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
+          MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+   }
+
+   n = mg_db_connect(p_page->p_srv, &chndle, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+
+   offset = mg_request_header_ex(p_page, p_buf, "d", MG_PRODUCT, &(parameter_array[0]));
+
+   for (n = offset; n < argument_count; n ++) {
+      data = mg_get_string(&(parameter_array[n]), NULL, &len);
+      mg_request_add(p_page->p_srv, chndle, p_buf, data, len, 0, MG_TX_DATA);
+   }
+
+   MG_MEMCHECK("Insufficient memory to process request", 1);
+
+   n = mg_db_send(p_page->p_srv, chndle, p_buf, 1);
+   if (!n) {
+      MG_ERROR1(p_page->p_srv->error_mess);
+   }
+   mg_db_receive(p_page->p_srv, chndle, p_buf, MG_BUFSIZE, 0);
+
+   MG_MEMCHECK("Insufficient memory to process response", 0);
+
+   mg_db_disconnect(p_page->p_srv, chndle, 1);
+
+   if ((n = mg_php_error(p_page, p_buf->p_buffer))) {
+      if (n == 2) {
+         MG_RETURN_STRING_AND_FREE_BUF(p_page->p_srv->error_code, 1);
+      }
+      MG_RETURN_FALSE_AND_FREE_BUF;
+   }
+   else {
+      MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer + MG_RECV_HEAD, 1);
+   }
+}
+/* }}} */
+
+
+/* {{{ proto bool m_sleep(int msecs)
+   Sleep for the number of milliseconds specified */
+ZEND_FUNCTION(m_sleep)
+{
+   char buffer[128];
+   int argument_count, n, msecs;
+   zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
+   MGPAGE *p_page;
+
+   p_page = MG_PHP_GLOBAL(p_page);
+   if (!p_page) {
+      MG_RETURN_FALSE;
+   }
+
+   mg_log_request(p_page, "m_sleep");
+
+   strcpy(p_page->p_srv->error_code, "");
+   strcpy(p_page->p_srv->error_mess, "");
+
+
+   /* get the number of arguments */
+   argument_count = ZEND_NUM_ARGS();
+
+   /* see if it satisfies our minimal request (1 argument) */
+   if (argument_count < 1)
+      MG_WRONG_PARAM_COUNT;
+
+   /* argument count is correct, now retrieve arguments */
+   if(zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
+      MG_WRONG_PARAM_COUNT;
+
+   n = 0;
+
+   convert_to_string_ex(&(parameter_array[0]));
+   strncpy(buffer, estrndup(Z_STRVAL_P(&parameter_array[0]), Z_STRLEN_P(&parameter_array[0])), 100);
+   buffer[100] = '\0';
+   msecs = (int) strtol(buffer, NULL, 10);
+
+   if (msecs >= 0) {
+      mg_sleep(msecs);
+   }
+   else {
+      MG_RETURN_FALSE;
+   }
+
+   MG_RETURN_TRUE;
 }
 /* }}} */
 
@@ -4686,6 +5069,8 @@ int mg_log_request(MGPAGE *p_page, char *function)
          p_page->p_log->log_transmissions = 1;
       p ++;
    }
+
+   p_page->p_srv->p_log = p_page->p_log;
 
    if (p_page->p_log->log_functions) {  
       mg_log_event(p_page->p_log, function, "function called", 0);

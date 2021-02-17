@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2017-2020 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2017-2021 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -51,6 +51,12 @@ Version 1.1.6 17 January 2020:
 
 Version 1.1.7 10 February 2020:
    Add a universal event log facility.  Remove the old interactive 'debug' facility.
+
+Version 1.2.8 15 February 2021:
+   Introduce support for M transaction processing: tstart, $tlevel, tcommit, trollback.
+   Correct a fault that occasionally led to failures when returning long strings to Node.js from the DB Server.
+	- This fault only affected network based connectivity to the DB Server.
+   Allow a DB Server response timeout to be set for network based connectivity.
 
 */
 
@@ -141,7 +147,7 @@ DBX_EXTFUN(int) dbx_version(int index, char *output, int output_len)
 DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
 {
    int rc, n, chndle, len, error_code;
-   char buffer[1024];
+   char buffer[1024], nstr[64];
    DBXCON *pcon;
    char *p, *p1, *p2;
 
@@ -209,6 +215,7 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
    pcon->shdir[0] = '\0';
    pcon->ip_address[0] = '\0';
    pcon->port = 0;
+   pcon->timeout = NETX_TIMEOUT;
 
    for (n = 0; n < pcon->argc; n ++) {
 
@@ -292,6 +299,16 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
             pcon->server_software[len] = '\0';
             mg_lcase(pcon->server_software);
             break;
+         case 13:
+            len = (len < 32) ? len : 32;
+            strncpy(nstr, p, len);
+            nstr[len] = '\0';
+            pcon->timeout = (int) strtol(nstr, NULL, 10);
+            if (pcon->timeout < 1) {
+               pcon->timeout = NETX_TIMEOUT;
+            }
+            break;
+
          default:
             break;
       }
@@ -332,7 +349,7 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
          ((MGSRV *) pcon->p_srv)->mem_error = 0;
          ((MGSRV *) pcon->p_srv)->mode = 0;
          ((MGSRV *) pcon->p_srv)->storage_mode = 0;
-         ((MGSRV *) pcon->p_srv)->timeout = 0;
+         ((MGSRV *) pcon->p_srv)->timeout = NETX_TIMEOUT;
 
          if (pcon->server[0])
             strcpy(((MGSRV *) pcon->p_srv)->server, pcon->server);
@@ -922,6 +939,199 @@ DBX_EXTFUN(int) dbx_increment(unsigned char *input, unsigned char *output)
    }
 
 dbx_increment_exit:
+
+   DBX_UNLOCK(rc);
+
+   return 0;
+}
+
+
+/* v1.2.8 */
+DBX_EXTFUN(int) dbx_tstart(unsigned char *input, unsigned char *output)
+{
+   int rc, n;
+   DBXCON *pcon;
+
+   pcon = mg_unpack_header(input, output);
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex(output ? output : input, "No Database Connection");
+      return 1;
+   }
+
+   mg_unpack_arguments(pcon);
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pcon->command, "a");
+      rc = netx_tcp_command(pcon, 0);
+      goto dbx_tstart_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      mg_set_error_message_ex(output ? output : input, "Transaction Processing only available over network based connectivity for YottaDB");
+      rc = CACHE_FAILURE;
+   }
+   else {
+      rc = pcon->p_isc_so->p_CacheTStart();
+   }
+
+   if (rc == CACHE_SUCCESS) {
+      sprintf((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset, "%d", rc);
+      n = (int) strlen((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset);
+      pcon->output_val.svalue.len_used += n;
+      mg_add_block_size(&(pcon->output_val.svalue), 0, (unsigned long) n, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+   }
+   else {
+      mg_error_message(pcon, rc);
+   }
+
+dbx_tstart_exit:
+
+   DBX_UNLOCK(rc);
+
+   return 0;
+}
+
+
+DBX_EXTFUN(int) dbx_tlevel(unsigned char *input, unsigned char *output)
+{
+   int rc, n;
+   DBXCON *pcon;
+
+   pcon = mg_unpack_header(input, output);
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex(output ? output : input, "No Database Connection");
+      return 1;
+   }
+
+   mg_unpack_arguments(pcon);
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pcon->command, "b");
+      rc = netx_tcp_command(pcon, 0);
+      goto dbx_tlevel_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      mg_set_error_message_ex(output ? output : input, "Transaction Processing only available over network based connectivity for YottaDB");
+      rc = CACHE_FAILURE;
+   }
+   else {
+      rc = pcon->p_isc_so->p_CacheTLevel();
+   }
+
+   if (rc >= 0) {
+      sprintf((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset, "%d", rc);
+      n = (int) strlen((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset);
+      pcon->output_val.svalue.len_used += n;
+      mg_add_block_size(&(pcon->output_val.svalue), 0, (unsigned long) n, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+   }
+   else {
+      mg_error_message(pcon, rc);
+   }
+
+dbx_tlevel_exit:
+
+   DBX_UNLOCK(rc);
+
+   return 0;
+}
+
+
+DBX_EXTFUN(int) dbx_tcommit(unsigned char *input, unsigned char *output)
+{
+   int rc, n;
+   DBXCON *pcon;
+
+   pcon = mg_unpack_header(input, output);
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex(output ? output : input, "No Database Connection");
+      return 1;
+   }
+
+   mg_unpack_arguments(pcon);
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pcon->command, "c");
+      rc = netx_tcp_command(pcon, 0);
+      goto dbx_tcommit_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      mg_set_error_message_ex(output ? output : input, "Transaction Processing only available over network based connectivity for YottaDB");
+      rc = CACHE_FAILURE;
+   }
+   else {
+      rc = pcon->p_isc_so->p_CacheTCommit();
+   }
+
+   if (rc == CACHE_SUCCESS) {
+      sprintf((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset, "%d", rc);
+      n = (int) strlen((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset);
+      pcon->output_val.svalue.len_used += n;
+      mg_add_block_size(&(pcon->output_val.svalue), 0, (unsigned long) n, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+   }
+   else {
+      mg_error_message(pcon, rc);
+   }
+
+dbx_tcommit_exit:
+
+   DBX_UNLOCK(rc);
+
+   return 0;
+}
+
+
+DBX_EXTFUN(int) dbx_trollback(unsigned char *input, unsigned char *output)
+{
+   int rc, n;
+   DBXCON *pcon;
+
+   pcon = mg_unpack_header(input, output);
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex(output ? output : input, "No Database Connection");
+      return 1;
+   }
+
+   mg_unpack_arguments(pcon);
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pcon->command, "d");
+      rc = netx_tcp_command(pcon, 0);
+      goto dbx_trollback_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      mg_set_error_message_ex(output ? output : input, "Transaction Processing only available over network based connectivity for YottaDB");
+      rc = CACHE_FAILURE;
+   }
+   else {
+      rc = pcon->p_isc_so->p_CacheTRollback(0);
+   }
+
+   if (rc == CACHE_SUCCESS) {
+      sprintf((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset, "%d", rc);
+      n = (int) strlen((char *) pcon->output_val.svalue.buf_addr + pcon->output_val.offset);
+      pcon->output_val.svalue.len_used += n;
+      mg_add_block_size(&(pcon->output_val.svalue), 0, (unsigned long) n, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+   }
+   else {
+      mg_error_message(pcon, rc);
+   }
+
+dbx_trollback_exit:
 
    DBX_UNLOCK(rc);
 
@@ -1860,6 +2070,16 @@ int isc_load_library(DBXCON *pcon)
 
    sprintf(fun, "%sEnableMultiThread", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheEnableMultiThread = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+
+   /* v1.2.8 */
+   sprintf(fun, "%sTStart", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CacheTStart = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sTLevel", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CacheTLevel = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sTCommit", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CacheTCommit = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sTRollback", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CacheTRollback = (int (*) (int)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
 
    pcon->pid = mg_current_process_id();
 
@@ -3804,10 +4024,6 @@ int mg_log_event(DBXLOG *p_log, char *message, char *title, int level)
    struct flock lock;
 #endif
 
-#ifdef _WIN32
-__try {
-#endif
-
    now = time(NULL);
    sprintf(timestr, "%s", ctime(&now));
    for (n = 0; timestr[n] != '\0'; n ++) {
@@ -3878,15 +4094,6 @@ __try {
       free((void *) p_buffer);
 
    return 1;
-
-#ifdef _WIN32
-}
-__except (EXCEPTION_EXECUTE_HANDLER ) {
-      return 0;
-}
-
-#endif
-
 }
 
 
@@ -3896,10 +4103,6 @@ int mg_log_buffer(DBXLOG *p_log, char *buffer, int buffer_len, char *title, int 
    int n, n1, nc, size;
    char tmp[16];
    char *p;
-
-#ifdef _WIN32
-__try {
-#endif
 
    for (n = 0, nc = 0; n < buffer_len; n ++) {
       c = (unsigned int) buffer[n];
@@ -3943,15 +4146,6 @@ __try {
    free((void *) p);
 
    return 1;
-
-#ifdef _WIN32
-}
-__except (EXCEPTION_EXECUTE_HANDLER ) {
-      return 0;
-}
-
-#endif
-
 }
 
 
@@ -4985,11 +5179,11 @@ int netx_tcp_handshake(DBXCON *pcon, int context)
    len = (int) strlen(buffer);
 
    netx_tcp_write(pcon, (unsigned char *) buffer, len);
-   len = netx_tcp_read(pcon, (unsigned char *) buffer, 5, 10, 0);
+   len = netx_tcp_read(pcon, (unsigned char *) buffer, 5, pcon->timeout, 1); /* v1.2.8 */
 
    len = mg_get_size((unsigned char *) buffer);
 
-   netx_tcp_read(pcon, (unsigned char *) buffer, len, 10, 0);
+   netx_tcp_read(pcon, (unsigned char *) buffer, len, pcon->timeout, 1); /* v1.2.8 */
    if (pcon->dbtype != DBX_DBTYPE_YOTTADB) {
       isc_parse_zv(buffer, pcon->p_zv);
    }
@@ -5033,13 +5227,13 @@ int netx_tcp_command(DBXCON *pcon, int context)
    }
 
    netx_tcp_write(pcon, (unsigned char *) pcon->input_str.buf_addr, pcon->input_str.len_used);
-   netx_tcp_read(pcon, (unsigned char *) pcon->output_val.svalue.buf_addr, 5, 10, 0);
+   netx_tcp_read(pcon, (unsigned char *) pcon->output_val.svalue.buf_addr, 5, pcon->timeout, 1); /* v1.2.8 */
    pcon->output_val.svalue.buf_addr[5] = '\0';
 
    len = mg_get_size((unsigned char *) pcon->output_val.svalue.buf_addr);
 
    if (len > 0) {
-      netx_tcp_read(pcon, (unsigned char *) pcon->output_val.svalue.buf_addr + 5, len, 10, 0);
+      netx_tcp_read(pcon, (unsigned char *) pcon->output_val.svalue.buf_addr + 5, len, pcon->timeout, 1); /* v1.2.8 */
    }
 
    pcon->output_val.svalue.len_used = len;
@@ -5898,6 +6092,7 @@ int mg_db_connect(MGSRV *p_srv, int *p_chndle, short context)
    pcon->p_log = &pcon->log;
    pcon->p_db_mutex = &pcon->db_mutex;
    pcon->p_zv = &pcon->zv;
+   pcon->timeout = p_srv->timeout; /* v1.2.8 */
 
    mg_log_init(pcon->p_log);
 
@@ -5971,6 +6166,7 @@ int mg_db_send(MGSRV *p_srv, int chndle, MGBUF *p_buf, int mode)
 
    if (p_srv->p_log && p_srv->p_log->log_transmissions) {
       char buffer[64];
+
       sprintf(buffer, "Transmission: Send to Host (size=%lu)", p_buf->data_size);
       mg_log_buffer(p_srv->p_log, p_buf->p_buffer, p_buf->data_size, buffer, 0);
    }
@@ -6022,7 +6218,10 @@ int mg_db_receive(MGSRV *p_srv, int chndle, MGBUF *p_buf, int size, int mode)
    unsigned long len, total, ssize;
    char s_buffer[16], stype[4];
    char *p;
+   fd_set rset, eset;
+   struct timeval tval;
    DBXCON *pcon;
+   unsigned long spin_count;
 
    if (p_srv->mode == 2) {
       return mg_invoke_server_api(p_srv, chndle, p_buf, size, mode);
@@ -6037,6 +6236,11 @@ int mg_db_receive(MGSRV *p_srv, int chndle, MGBUF *p_buf, int size, int mode)
    p_buf->p_buffer[0] = '\0';
    p_buf->data_size = 0;
 
+   /* v1.2.8 */
+   pcon->timeout = p_srv->timeout;
+   tval.tv_sec = pcon->timeout;
+   tval.tv_usec = 0;
+
    if (pcon->eod) {
       pcon->eod = 0;
       return 0;
@@ -6050,7 +6254,32 @@ int mg_db_receive(MGSRV *p_srv, int chndle, MGBUF *p_buf, int size, int mode)
    else
       total = p_buf->size;
 
+   spin_count = 0;
    for (;;) {
+      spin_count ++;
+
+      if (pcon->timeout) {
+         FD_ZERO(&rset);
+         FD_ZERO(&eset);
+         FD_SET(pcon->cli_socket, &rset);
+         FD_SET(pcon->cli_socket, &eset);
+
+         n = NETX_SELECT((int) (pcon->cli_socket + 1), &rset, NULL, &eset, &tval);
+
+         if (n == 0) {
+            sprintf(pcon->error, "TCP Read Error: Server did not respond within the timeout period (%d seconds)", pcon->timeout);
+            result = NETX_READ_TIMEOUT;
+            pcon->eod = 1;
+            break;
+         }
+
+         if (n < 0 || !NETX_FD_ISSET(pcon->cli_socket, &rset)) {
+            strcpy(pcon->error, "TCP Read Error: Server closed the connection without having returned any data");
+            result = NETX_READ_ERROR;
+            pcon->eod = 1;
+            break;
+         }
+      }
 
       n = NETX_RECV(pcon->cli_socket, p_buf->p_buffer + len, total - len, 0);
 
@@ -6610,10 +6839,12 @@ int mg_bind_server_api(MGSRV *p_srv, short context)
    pcon->p_zv = &pcon->zv;
 
    mg_log_init(pcon->p_log);
+
 #if defined(MG_DBA_DSO)
    strcpy(pcon->p_log->product, MG_LOG_FILE);
    strcpy(pcon->p_log->product, MG_PRODUCT);
 #endif
+
    strcpy(pcon->p_log->product_version, DBX_VERSION);
 
    strcpy(buffer, p_srv->dbtype_name);

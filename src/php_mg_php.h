@@ -4,7 +4,7 @@
    | Description: PHP Extension for M/Cache/IRIS                              |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2002-2020 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2002-2021 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -61,7 +61,7 @@
 #define MG_DEFAULT_PORT       7040
 #endif
 #else
-#define PHP_MG_PHP_VERSION    "3.0.56"
+#define PHP_MG_PHP_VERSION    "3.2.57"
 #define MG_EXT_NAME           "mg_php"
 #if !defined(MG_DEFAULT_PORT)
 #define MG_DEFAULT_PORT       7041
@@ -104,6 +104,12 @@ static PHP_FUNCTION(m_defined);
 static PHP_FUNCTION(m_data);
 static PHP_FUNCTION(m_order);
 static PHP_FUNCTION(m_previous);
+static PHP_FUNCTION(m_increment);
+static PHP_FUNCTION(m_tstart);
+static PHP_FUNCTION(m_tlevel);
+static PHP_FUNCTION(m_tcommit);
+static PHP_FUNCTION(m_trollback);
+static PHP_FUNCTION(m_sleep);
 static PHP_FUNCTION(m_html);
 static PHP_FUNCTION(m_html_method);
 static PHP_FUNCTION(m_http);

@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2017-2020 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2017-2021 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -326,7 +326,7 @@ typedef int    xc_status_t;
    } \
 
 
-#define NETX_TIMEOUT             10
+#define NETX_TIMEOUT             30
 #define NETX_IPV6                1
 #define NETX_READ_EOF            0
 #define NETX_READ_NOCON          -1
@@ -860,6 +860,11 @@ typedef struct tagDBXISCSO {
 
    int               (* p_CacheEnableMultiThread)        (void);
 
+   int               (* p_CacheTStart)                   (void);
+   int               (* p_CacheTLevel)                   (void);
+   int               (* p_CacheTCommit)                  (void);
+   int               (* p_CacheTRollback)                (int nlev);
+
 } DBXISCSO, *PDBXISCSO;
 
 
@@ -970,6 +975,7 @@ typedef struct tagDBXCON {
 #define MG_UCI                   "USER"
 
 #if defined(MG_DBA_DSO)
+#define MG_EXT_NAME              "mg_dba"
 #ifdef _WIN32
 #define MG_LOG_FILE              "c:/temp/" MG_EXT_NAME ".log"
 #else
@@ -1058,6 +1064,10 @@ DBX_EXTFUN(int)         dbx_previous                  (unsigned char *input, uns
 DBX_EXTFUN(int)         dbx_delete                    (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_defined                   (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_increment                 (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_tstart                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_tlevel                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_tcommit                   (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_trollback                 (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_function                  (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_classmethod               (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_method                    (unsigned char *input, unsigned char *output);

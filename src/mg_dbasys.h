@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2017-2020 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2017-2021 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -30,20 +30,20 @@
 #define MG_DBASYS_H
 
 #define MAJORVERSION             1
-#define MINORVERSION             1
-#define MAINTVERSION             7
-#define BUILDNUMBER              7
+#define MINORVERSION             2
+#define MAINTVERSION             8
+#define BUILDNUMBER              8
 
 #define DBX_VERSION_MAJOR        "1"
-#define DBX_VERSION_MINOR        "1"
-#define DBX_VERSION_BUILD        "7"
+#define DBX_VERSION_MINOR        "2"
+#define DBX_VERSION_BUILD        "8"
 
 #define DBX_VERSION              DBX_VERSION_MAJOR "." DBX_VERSION_MINOR "." DBX_VERSION_BUILD
 #define DBX_COMPANYNAME          "M/Gateway Developments Ltd\0"
 #define DBX_FILEDESCRIPTION      "API Abstraction for InterSystems IRIS/Cache and YottaDB\0"
 #define DBX_FILEVERSION          DBX_VERSION
 #define DBX_INTERNALNAME         "mg_dba\0"
-#define DBX_LEGALCOPYRIGHT       "Copyright 2017-2020, M/Gateway Developments Ltd\0"
+#define DBX_LEGALCOPYRIGHT       "Copyright 2017-2021, M/Gateway Developments Ltd\0"
 #define DBX_ORIGINALFILENAME     "mg_dba\0"
 #define DBX_PLATFORM             PROCESSOR_ARCHITECTURE
 #define DBX_PRODUCTNAME          "mg_dba\0"
