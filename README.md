@@ -3,9 +3,9 @@
 A PHP Extension for InterSystems **Cache/IRIS** and **YottaDB**.
 
 Chris Munt <cmunt@mgateway.com>  
-12 January 2021, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+18 February 2021, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Current Release: Version: 3.1; Revision 56a.
+* Current Release: Version: 3.2; Revision 57.
 * Two connectivity models to the InterSystems or YottaDB database are provided: High performance via the local database API or network based.
 * [Release Notes](#RelNotes) can be found at the end of this document.
 
@@ -18,6 +18,7 @@ Contents
 * [Connecting to the database](#Connect)
 * [Invocation of database commands](#DBCommands)
 * [Invocation of database functions](#DBFunctions)
+* [Transaction Processing](#TProcessing)
 * [Direct access to InterSystems classes (IRIS and Cache)](#DBClasses)
 * [License](#License)
 
@@ -44,7 +45,7 @@ InterSystems **Cache/IRIS** or **YottaDB** (or similar M database):
 There are three parts to **mg\_php** installation and configuration.
 
 * The PHP extension (**mg\_php.so** or **mg\_php.dll**).
-* The database (or server) side code: **zmgsi**
+* The DB Superserver: the **%zmgsi** routines.
 * A network configuration to bind the former two elements together.
 
 ### Building the mg\_php extension
@@ -103,9 +104,9 @@ Invoke the following commands to build the **mg\_php.dll** extension:
        nmake install
 
 
-### Installing the M support routines
+### Installing the DB Superserver
 
-The M support routines are required for:
+The DB Superserver is required for:
 
 * Network based access to databases.
 
@@ -122,7 +123,7 @@ Change to your development Namespace and check the installation:
        do ^%zmgsi
 
        M/Gateway Developments Ltd - Service Integration Gateway
-       Version: 3.6; Revision 15 (6 November 2020)
+       Version: 4.0; Revision 16 (11 February 2021)
 
 
 #### Installation for YottaDB
@@ -151,78 +152,37 @@ Link all the **zmgsi** routines and check the installation:
        do ^%zmgsi
 
        M/Gateway Developments Ltd - Service Integration Gateway
-       Version: 3.6; Revision 15 (6 November 2020)
+       Version: 4.0; Revision 16 (11 February 2021)
 
 Note that the version of **zmgsi** is successfully displayed.
 
+Finally, add the following lines to the interface file (**zmgsi.ci** in the example used in the db.open() method).
 
-### Setting up the network service (for network based connectivity only)
+       sqlemg: ydb_string_t * sqlemg^%zmgsis(I:ydb_string_t*, I:ydb_string_t *, I:ydb_string_t *)
+       sqlrow: ydb_string_t * sqlrow^%zmgsis(I:ydb_string_t*, I:ydb_string_t *, I:ydb_string_t *)
+       sqldel: ydb_string_t * sqldel^%zmgsis(I:ydb_string_t*, I:ydb_string_t *)
+       ifc_zmgsis: ydb_string_t * ifc^%zmgsis(I:ydb_string_t*, I:ydb_string_t *, I:ydb_string_t*)
+
+A copy of this file can be downloaded from the **/unix** directory of the  **mgsi** GitHub repository [here](https://github.com/chrisemunt/mgsi)
+
+
+### Starting the DB Superserver
 
 The default TCP server port for **zmgsi** is **7041**.  If you wish to use an alternative port then modify the following instructions accordingly.
 
-PHP code using the **mg\_php** functions will, by default, expect the database server to be listening on port **7041** of the local server (localhost).  However, **mg\_php** provides the functionality to modify these default settings at run-time.  It is not necessary for the web server/PHP installation to reside on the same host as the database server.
+* For InterSystems DB servers the concurrent TCP service should be started in the **%SYS** Namespace.
 
-#### InterSystems Cache/IRIS
-
-Start the Cache/IRIS-hosted concurrent TCP service in the Manager UCI:
+Start the DB Superserver using the following command:
 
        do start^%zmgsi(0) 
 
 To use a server TCP port other than 7041, specify it in the start-up command (as opposed to using zero to indicate the default port of 7041).
 
-#### YottaDB
+* For YottaDB, as an alternative to starting the DB Superserver from the command prompt, Superserver processes can be started via the **xinetd** daemon.  Instructions for configuring this option can be found in the **mgsi** repository [here](https://github.com/chrisemunt/mgsi)
 
-Network connectivity to **YottaDB** is managed via the **xinetd** service.  First create the following launch script (called **zmgsi\_ydb** here):
+PHP code using the **mg\_php** functions will, by default, expect the database server to be listening on port **7041** of the local server (localhost).  However, **mg\_php** provides the functionality to modify these default settings at run-time.  It is not necessary for the PHP installation to reside on the same host as the database server.
 
-       /usr/local/lib/yottadb/r130/zmgsi_ydb
-
-Content:
-
-       #!/bin/bash
-       cd /usr/local/lib/yottadb/r130
-       export ydb_dir=/root/.yottadb
-       export ydb_dist=/usr/local/lib/yottadb/r130
-       export ydb_routines="/root/.yottadb/r1.30_x86_64/o*(/root/.yottadb/r1.30_x86_64/r /root/.yottadb/r) /usr/local/lib/yottadb/r130/libyottadbutil.so"
-       export ydb_gbldir="/root/.yottadb/r1.30_x86_64/g/yottadb.gld"
-       $ydb_dist/ydb -r xinetd^%zmgsis
-
-Note that you should, if necessary, modify the permissions on this file so that it is executable.  For example:
-
-       chmod a=rx /usr/local/lib/yottadb/r130/zmgsi_ydb
-
-Create the **xinetd** script (called **zmgsi\_xinetd** here): 
-
-       /etc/xinetd.d/zmgsi_xinetd
-
-Content:
-
-       service zmgsi_xinetd
-       {
-            disable         = no
-            type            = UNLISTED
-            port            = 7041
-            socket_type     = stream
-            wait            = no
-            user            = root
-            server          = /usr/local/lib/yottadb/r130/zmgsi_ydb
-       }
-
-* Note: sample copies of **zmgsi\_xinetd** and **zmgsi\_ydb** are included in the **/unix** directory of the **mgsi** GitHub repository [here](https://github.com/chrisemunt/mgsi).
-
-Edit the services file:
-
-       /etc/services
-
-Add the following line to this file:
-
-       zmgsi_xinetd          7041/tcp                        # zmgsi
-
-Finally restart the **xinetd** service:
-
-       /etc/init.d/xinetd restart
-
-
-### Resources used by zmgsi
+### Resources used by the DB Superserver (%zmgsi)
 
 The **zmgsi** server-side code will write to the following global:
 
@@ -268,7 +228,7 @@ Before invoking database functionality,the following simple script can be used t
 
 This should return something like:
 
-       M/Gateway Developments Ltd. - mg_php: PHP Gateway to M - Version 3.1.56
+       M/Gateway Developments Ltd. - mg_php: PHP Gateway to M - Version 3.2.57
 
 ### Connecting the database via the network.
 
@@ -388,7 +348,7 @@ Equivalent PHP code:
 **mg\_php** provides functions to invoke all database commands and functions.
 
 
-#### Set a record (m\_set)
+### Set a record (m\_set)
 
        result = m_set(<global>, <key>, <data>)
       
@@ -396,7 +356,7 @@ Example:
 
        $result = m_set("^Person", 1, "Chris Munt");
 
-#### Get a record (m\_get)
+### Get a record (m\_get)
 
        result = m_get(<global>, <key>)
       
@@ -404,7 +364,7 @@ Example:
 
        $result = m_get("^Person", 1);
 
-#### Delete a record (m\_delete or m\_kill)
+### Delete a record (m\_delete or m\_kill)
 
        result = m_delete(<dbhandle>, <global>, <key>)
       
@@ -413,7 +373,7 @@ Example:
        $result = m_delete("^Person", 1);
 
 
-#### Check whether a record is defined (m\_defined or m\_data)
+### Check whether a record is defined (m\_defined or m\_data)
 
        result = m_defined(<global>, <key>)
       
@@ -422,7 +382,7 @@ Example:
        $result = m_defined("^Person", 1);
 
 
-#### Parse a set of records (in order - m\_order)
+### Parse a set of records (in order - m\_order)
 
        result = m_order(<global>, <key>)
       
@@ -436,7 +396,7 @@ Example:
        }
 
 
-#### Parse a set of records (in reverse order - m\_previous)
+### Parse a set of records (in reverse order - m\_previous)
 
        result = m_previous(<global>, <key>)
       
@@ -448,6 +408,18 @@ Example:
           print("\n$key = $name");
           $key = m_previous("^Person", $key);
        }
+
+
+### Increment a global node (m\_increment)
+
+       result = m_increment(<global>, <key>, <increment_value>)
+      
+Example:
+
+       $result = m_increment("^Global", "counter", 1);
+
+
+This will increment the value of global node ^Global("counter") by 1 and return the next value.
 
 ## <a name="DBFunctions"> Invocation of database functions
 
@@ -467,9 +439,59 @@ PHP invocation:
        $result = m_function("add^math", 2, 3);
 
 
+## <a name="TProcessing"></a> Transaction Processing
+
+M DB Servers implement Transaction Processing by means of the methods described in this section.
+
+* With YottaDB, these methods are only available over network based connectivity to the DB Server.
+
+### Start a Transaction
+
+       result = m_tstart()
+
+* On successful completion this method will return zero, or an error code on failure.
+
+Example:
+
+       $result = m_tstart()
+
+
+### Determine the Transaction Level
+
+       result = m_tlevel()
+
+* Transactions can be nested and this method will return the level of nesting.  If no Transaction is active this method will return zero.  Otherwise a positive integer will be returned to represent the current depth of Transaction nesting.
+
+Example:
+
+       $tlevel = m_tlevel()
+
+
+### Commit a Transaction
+
+       result = m_tcommit()
+
+* On successful completion this method will return zero, or an error code on failure.
+
+Example:
+
+       $result = m_tcommit()
+
+
+### Rollback a Transaction
+
+       result = m_trollback()
+
+* On successful completion this method will return zero, or an error code on failure.
+
+Example:
+
+       $result = m_trollback()
+
+
 ## <a name="DBClasses"> Direct access to InterSystems classes (IRIS and Cache)
 
-#### Invocation of a ClassMethod (m\_classmethod)
+### Invocation of a ClassMethod (m\_classmethod)
 
        result = m_classmethod(<class_name>, <classmethod_name>, <parameters>)
       
@@ -506,6 +528,14 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 * Initial Release
 
-### v3.1.56 (12 January 2021)
+### v3.1.56a (12 January 2021)
 
 * Restructure and update the documentation.
+
+### v3.2.57 (18 February 2021)
+
+* Introduce support for M transaction processing: tstart, $tlevel, tcommit, trollback.
+	* Available with DB Superserver v4 and later. 
+* Introduce support for the M increment function.
+
+
