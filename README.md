@@ -3,9 +3,9 @@
 A PHP Extension for InterSystems **Cache/IRIS** and **YottaDB**.
 
 Chris Munt <cmunt@mgateway.com>  
-18 February 2021, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+14 March 2021, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Current Release: Version: 3.2; Revision 57.
+* Current Release: Version: 3.2; Revision 58.
 * Two connectivity models to the InterSystems or YottaDB database are provided: High performance via the local database API or network based.
 * [Release Notes](#RelNotes) can be found at the end of this document.
 
@@ -297,9 +297,12 @@ Example:
 
 This example assumes that the YottaDB installation is in: **/usr/local/lib/yottadb/r130**. 
 This is where the **libyottadb.so** library is found.
-Also, in this directory, as indicated in the environment variables, the YottaDB routine interface file resides (**zmgsi.ci** in this example).  The interface file must contain the following line:
+Also, in this directory, as indicated in the environment variables, the YottaDB routine interface file resides (**zmgsi.ci** in this example).  The interface file must contain the following lines:
 
-       ifc_zmgsis: ydb_char_t * ifc^%zmgsis(I:ydb_char_t*, I:ydb_char_t *, I:ydb_char_t*)
+       sqlemg: ydb_string_t * sqlemg^%zmgsis(I:ydb_string_t*, I:ydb_string_t *, I:ydb_string_t *)
+       sqlrow: ydb_string_t * sqlrow^%zmgsis(I:ydb_string_t*, I:ydb_string_t *, I:ydb_string_t *)
+       sqldel: ydb_string_t * sqldel^%zmgsis(I:ydb_string_t*, I:ydb_string_t *)
+       ifc_zmgsis: ydb_string_t * ifc^%zmgsis(I:ydb_string_t*, I:ydb_string_t *, I:ydb_string_t*)
 
 Moving on to the PHP code for binding to the YottaDB database.  Modify the values of these environment variables in accordance with your own YottaDB installation.  Note that each line is terminated with a linefeed character, with a double linefeed at the end of the list.
 
@@ -443,8 +446,6 @@ PHP invocation:
 
 M DB Servers implement Transaction Processing by means of the methods described in this section.
 
-* With YottaDB, these methods are only available over network based connectivity to the DB Server.
-
 ### Start a Transaction
 
        result = m_tstart()
@@ -536,4 +537,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 	* Available with DB Superserver v4 and later. 
 * Introduce support for the M increment function.
 
+### v3.2.58 (14 March 2021)
 
+* Introduce support for YottaDB Transaction Processing over API based connectivity.
+	* This functionality was previously only available over network-based connectivity to YottaDB.
