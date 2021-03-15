@@ -140,6 +140,9 @@ Version 3.2.57 18 February 2021:
    Introduce support for M transaction processing: tstart, $tlevel, tcommit, trollback.
    Introduce support for the M increment function.
 
+Version 3.2.58 14 March 2021:
+   Introduce support for YottaDB Transaction Processing over API based connectivity.
+   - This functionality was previously only available over network-based connectivity to YottaDB.
 */
 
 #ifdef HAVE_CONFIG_H

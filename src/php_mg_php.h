@@ -61,7 +61,7 @@
 #define MG_DEFAULT_PORT       7040
 #endif
 #else
-#define PHP_MG_PHP_VERSION    "3.2.57"
+#define PHP_MG_PHP_VERSION    "3.2.58"
 #define MG_EXT_NAME           "mg_php"
 #if !defined(MG_DEFAULT_PORT)
 #define MG_DEFAULT_PORT       7041

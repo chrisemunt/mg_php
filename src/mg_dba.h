@@ -214,7 +214,24 @@ typedef struct {
 
 /* YottaDB */
 
+#define YDB_OK       0
 #define YDB_DEL_TREE 1
+
+#define YDB_INT_MAX        ((int)0x7fffffff)
+#define YDB_TP_RESTART     (YDB_INT_MAX - 1)
+#define YDB_TP_ROLLBACK    (YDB_INT_MAX - 2)
+#define YDB_NODE_END       (YDB_INT_MAX - 3)
+#define YDB_LOCK_TIMEOUT   (YDB_INT_MAX - 4)
+#define YDB_NOTOK          (YDB_INT_MAX - 5)
+
+#define YDB_MAX_TP         32
+#define YDB_TPCTX_DB       1
+#define YDB_TPCTX_TLEVEL   2
+#define YDB_TPCTX_COMMIT   3
+#define YDB_TPCTX_ROLLBACK 4
+#define YDB_TPCTX_FUN      10
+#define YDB_TPCTX_QUERY    11
+#define YDB_TPCTX_ORDER    12
 
 typedef struct {
    unsigned int   len_alloc;
@@ -233,6 +250,9 @@ typedef struct {
 } ci_name_descriptor;
 
 typedef ydb_buffer_t DBXSTR;
+typedef char         ydb_char_t;
+typedef long         ydb_long_t;
+typedef int          (*ydb_tpfnptr_t) (void *tpfnparm);  
 
 
 /* End of YottaDB */
@@ -255,6 +275,8 @@ typedef int    xc_status_t;
 #define DBX_MAXARGS              64
 
 #define DBX_ERROR_SIZE           512
+
+#define DBX_THREAD_STACK_SIZE    0xf0000
 
 #define DBX_DSORT_INVALID        0
 #define DBX_DSORT_DATA           1
@@ -646,23 +668,23 @@ typedef struct tagNETXSOCK {
    WSADATA                       wsadata;
    int                           wsastartup;
    WORD                          version_requested;
-   MG_LPFN_WSASOCKET                p_WSASocket;
-   MG_LPFN_WSAGETLASTERROR          p_WSAGetLastError; 
-   MG_LPFN_WSASTARTUP               p_WSAStartup;
-   MG_LPFN_WSACLEANUP               p_WSACleanup;
-   MG_LPFN_WSAFDISSET               p_WSAFDIsSet;
-   MG_LPFN_WSARECV                  p_WSARecv;
-   MG_LPFN_WSASEND                  p_WSASend;
+   MG_LPFN_WSASOCKET             p_WSASocket;
+   MG_LPFN_WSAGETLASTERROR       p_WSAGetLastError; 
+   MG_LPFN_WSASTARTUP            p_WSAStartup;
+   MG_LPFN_WSACLEANUP            p_WSACleanup;
+   MG_LPFN_WSAFDISSET            p_WSAFDIsSet;
+   MG_LPFN_WSARECV               p_WSARecv;
+   MG_LPFN_WSASEND               p_WSASend;
 
 #if defined(NETX_IPV6)
-   MG_LPFN_WSASTRINGTOADDRESS       p_WSAStringToAddress;
-   MG_LPFN_WSAADDRESSTOSTRING       p_WSAAddressToString;
-   MG_LPFN_GETADDRINFO              p_getaddrinfo;
-   MG_LPFN_FREEADDRINFO             p_freeaddrinfo;
-   MG_LPFN_GETNAMEINFO              p_getnameinfo;
-   MG_LPFN_GETPEERNAME              p_getpeername;
-   MG_LPFN_INET_NTOP                p_inet_ntop;
-   MG_LPFN_INET_PTON                p_inet_pton;
+   MG_LPFN_WSASTRINGTOADDRESS    p_WSAStringToAddress;
+   MG_LPFN_WSAADDRESSTOSTRING    p_WSAAddressToString;
+   MG_LPFN_GETADDRINFO           p_getaddrinfo;
+   MG_LPFN_FREEADDRINFO          p_freeaddrinfo;
+   MG_LPFN_GETNAMEINFO           p_getnameinfo;
+   MG_LPFN_GETPEERNAME           p_getpeername;
+   MG_LPFN_INET_NTOP             p_inet_ntop;
+   MG_LPFN_INET_PTON             p_inet_pton;
 #else
    LPVOID                        p_WSAStringToAddress;
    LPVOID                        p_WSAAddressToString;
@@ -674,31 +696,31 @@ typedef struct tagNETXSOCK {
    LPVOID                        p_inet_pton;
 #endif
 
-   MG_LPFN_CLOSESOCKET              p_closesocket;
-   MG_LPFN_GETHOSTNAME              p_gethostname;
-   MG_LPFN_GETHOSTBYNAME            p_gethostbyname;
-   MG_LPFN_GETHOSTBYADDR            p_gethostbyaddr;
-   MG_LPFN_GETSERVBYNAME            p_getservbyname;
+   MG_LPFN_CLOSESOCKET           p_closesocket;
+   MG_LPFN_GETHOSTNAME           p_gethostname;
+   MG_LPFN_GETHOSTBYNAME         p_gethostbyname;
+   MG_LPFN_GETHOSTBYADDR         p_gethostbyaddr;
+   MG_LPFN_GETSERVBYNAME         p_getservbyname;
 
-   MG_LPFN_HTONS                    p_htons;
-   MG_LPFN_HTONL                    p_htonl;
-   MG_LPFN_NTOHL                    p_ntohl;
-   MG_LPFN_NTOHS                    p_ntohs;
-   MG_LPFN_CONNECT                  p_connect;
-   MG_LPFN_INET_ADDR                p_inet_addr;
-   MG_LPFN_INET_NTOA                p_inet_ntoa;
+   MG_LPFN_HTONS                 p_htons;
+   MG_LPFN_HTONL                 p_htonl;
+   MG_LPFN_NTOHL                 p_ntohl;
+   MG_LPFN_NTOHS                 p_ntohs;
+   MG_LPFN_CONNECT               p_connect;
+   MG_LPFN_INET_ADDR             p_inet_addr;
+   MG_LPFN_INET_NTOA             p_inet_ntoa;
 
-   MG_LPFN_SOCKET                   p_socket;
-   MG_LPFN_SETSOCKOPT               p_setsockopt;
-   MG_LPFN_GETSOCKOPT               p_getsockopt;
-   MG_LPFN_GETSOCKNAME              p_getsockname;
-   MG_LPFN_SELECT                   p_select;
-   MG_LPFN_RECV                     p_recv;
-   MG_LPFN_SEND                     p_send;
-   MG_LPFN_SHUTDOWN                 p_shutdown;
-   MG_LPFN_BIND                     p_bind;
-   MG_LPFN_LISTEN                   p_listen;
-   MG_LPFN_ACCEPT                   p_accept;
+   MG_LPFN_SOCKET                p_socket;
+   MG_LPFN_SETSOCKOPT            p_setsockopt;
+   MG_LPFN_GETSOCKOPT            p_getsockopt;
+   MG_LPFN_GETSOCKNAME           p_getsockname;
+   MG_LPFN_SELECT                p_select;
+   MG_LPFN_RECV                  p_recv;
+   MG_LPFN_SEND                  p_send;
+   MG_LPFN_SHUTDOWN              p_shutdown;
+   MG_LPFN_BIND                  p_bind;
+   MG_LPFN_LISTEN                p_listen;
+   MG_LPFN_ACCEPT                p_accept;
 #endif /* #if defined(_WIN32) */
 
 } NETXSOCK, *PNETXSOCK;
@@ -727,6 +749,7 @@ typedef struct tagDBXZV {
    unsigned long  vnumber; /* yymbbbb */
    char           version[64];
 } DBXZV, *PDBXZV;
+
 
 typedef struct tagDBXMUTEX {
    unsigned char     created;
@@ -767,6 +790,19 @@ typedef struct tagDBXFUN {
    int            routine_len;
    char *         routine;
    char           buffer[128];
+   /* v1.2.9 */
+   int            argc;
+   ydb_string_t   in[DBX_MAXARGS];
+   ydb_string_t   out;
+   ydb_buffer_t * global;
+   int            in_nkeys;
+   ydb_buffer_t * in_keys;
+   int          * out_nkeys;
+   ydb_buffer_t * out_keys;
+   int            getdata;
+   ydb_buffer_t * data;
+   int            dir;
+   int            rc;
 } DBXFUN, *PDBXFUN;
 
 
@@ -891,6 +927,11 @@ typedef struct tagDBXYDBSO {
    int               (* p_ydb_incr_s)                    (ydb_buffer_t *varname, int subs_used, ydb_buffer_t *subsarray, ydb_buffer_t *increment, ydb_buffer_t *ret_value);
    int               (* p_ydb_ci)                        (const char *c_rtn_name, ...);
    int               (* p_ydb_cip)                       (ci_name_descriptor *ci_info, ...);
+   int               (* p_ydb_lock_incr_s)               (unsigned long long timeout_nsec, ydb_buffer_t *varname, int subs_used, ydb_buffer_t *subsarray);
+   int               (* p_ydb_lock_decr_s)               (ydb_buffer_t *varname, int subs_used, ydb_buffer_t *subsarray);
+   void              (* p_ydb_zstatus)                   (ydb_char_t* msg_buffer, ydb_long_t buf_len);
+   int               (* p_ydb_tp_s)                      (ydb_tpfnptr_t tpfn, void *tpfnparm, const char *transid, int namecount, ydb_buffer_t *varnames);
+
 } DBXYDBSO, *PDBXYDBSO;
 
 
@@ -910,7 +951,6 @@ typedef struct tagDBXGTMSO {
 
 typedef struct tagDBXCON {
    short          dbtype;
-   int            argc;
    unsigned long  pid;
    char           shdir[256];
    char           username[64];
@@ -919,11 +959,6 @@ typedef struct tagDBXCON {
    char           input_device[64];
    char           output_device[64];
    char           debug_str[64];
-   DBXSTR         input_str;
-   DBXVAL         output_val;
-   int            offset;
-   DBXVAL         args[DBX_MAXARGS];
-   ydb_buffer_t   yargs[DBX_MAXARGS];
    int            error_code;
    char           error[DBX_ERROR_SIZE];
    short          use_db_mutex;
@@ -936,7 +971,6 @@ typedef struct tagDBXCON {
    DBXISCSO       *p_isc_so;
    DBXYDBSO       *p_ydb_so;
    DBXGTMSO       *p_gtm_so;
-   short          increment;
 
    short          connected;
    int            port;
@@ -947,6 +981,11 @@ typedef struct tagDBXCON {
    SOCKET         cli_socket;
    char           info[256];
 
+   /* v1.2.9 */
+   void           *pmeth_base;
+   int            tlevel;
+   void *         pthrt[YDB_MAX_TP];
+
    /* Old MGWSI protocol */
 
    short          eod;
@@ -955,7 +994,6 @@ typedef struct tagDBXCON {
    int            chndle;
    int            base_port;
    int            child_port;
-   char           command[4];
    char           mpid[128];
    char           server[64];
    char           server_software[64];
@@ -963,6 +1001,42 @@ typedef struct tagDBXCON {
    void *         p_srv;
 
 } DBXCON, *PDBXCON;
+
+
+/* v1.2.9 */
+typedef struct tagDBXMETH {
+   short          done;
+   short          lock;
+   short          increment;
+   int            binary;
+   int            argc;
+   DBXSTR         input_str;
+   DBXVAL         output_val;
+   int            offset;
+   DBXVAL         args[DBX_MAXARGS];
+   ydb_buffer_t   yargs[DBX_MAXARGS];
+   char           command[4];
+   int            (* p_dbxfun) (struct tagDBXMETH * pmeth);
+   DBXCON         *pcon;
+   DBXFUN         *pfun;
+} DBXMETH, *PDBXMETH;
+
+
+/* v1.2.9 */
+typedef struct tagDBXTHRT {
+   int               context;
+   int               done;
+#if !defined(_WIN32)
+   pthread_t         parent_tid;
+   pthread_t         tp_tid;
+   pthread_mutex_t   req_cv_mutex;
+   pthread_cond_t    req_cv;
+   pthread_mutex_t   res_cv_mutex;
+   pthread_cond_t    res_cv;
+#endif
+   int               task_id;
+   DBXMETH           *pmeth;
+} DBXTHRT, *PDBXTHRT;
 
 
 #define MG_HOST                  "127.0.0.1"
@@ -1058,17 +1132,29 @@ DBX_EXTFUN(int)         dbx_version                   (int index, char *output, 
 DBX_EXTFUN(int)         dbx_open                      (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_close                     (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_set                       (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_set_ex                    (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_get                       (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_get_ex                    (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_next                      (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_next_ex                   (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_previous                  (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_previous_ex               (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_delete                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_delete_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_defined                   (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_defined_ex                (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_increment                 (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_increment_ex              (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tstart                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_tstart_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tlevel                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_tlevel_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tcommit                   (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_tcommit_ex                (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_trollback                 (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_trollback_ex              (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_function                  (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_function_ex               (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_classmethod               (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_method                    (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_getproperty               (unsigned char *input, unsigned char *output);
@@ -1081,28 +1167,38 @@ DBX_EXTFUN(int)         dbx_benchmark                 (unsigned char *inputstr, 
 
 int                     isc_load_library              (DBXCON *pcon);
 int                     isc_authenticate              (DBXCON *pcon);
-int                     isc_open                      (DBXCON *pcon);
+int                     isc_open                      (DBXMETH *pmeth);
 int                     isc_parse_zv                  (char *zv, DBXZV * p_isc_sv);
 int                     isc_change_namespace          (DBXCON *pcon, char *nspace);
 int                     isc_pop_value                 (DBXCON *pcon, DBXVAL *value, int required_type);
-int                     isc_error_message             (DBXCON *pcon, int error_code);
+int                     isc_error_message             (DBXMETH *pmeth, int error_code);
 
 int                     ydb_load_library              (DBXCON *pcon);
-int                     ydb_open                      (DBXCON *pcon);
+int                     ydb_open                      (DBXMETH *pmeth);
 int                     ydb_parse_zv                  (char *zv, DBXZV * p_ydb_sv);
-int                     ydb_error_message             (DBXCON *pcon, int error_code);
-int                     ydb_function                  (DBXCON *pcon, DBXFUN *pfun);
+int                     ydb_get_intsvar               (DBXCON *pcon, char *svarname);
+int                     ydb_error_message             (DBXMETH *pmeth, int error_code);
+int                     ydb_function                  (DBXMETH *pmeth, DBXFUN *pfun);
+int                     ydb_function_ex               (DBXMETH *pmeth, DBXFUN *pfun);
+int                     ydb_transaction_cb            (void *pargs);
+#if defined(_WIN32)
+LPTHREAD_START_ROUTINE  ydb_transaction_thread        (LPVOID pargs);
+#else
+void *                  ydb_transaction_thread        (void *pargs);
+#endif
+int                     ydb_transaction               (DBXMETH *pmeth);
+int                     ydb_transaction_task          (DBXMETH *pmeth, int context);
 
 int                     gtm_load_library              (DBXCON *pcon);
-int                     gtm_open                      (DBXCON *pcon);
+int                     gtm_open                      (DBXMETH *pmeth);
 int                     gtm_parse_zv                  (char *zv, DBXZV * p_gtm_sv);
-int                     gtm_error_message             (DBXCON *pcon, int error_code);
+int                     gtm_error_message             (DBXMETH *pmeth, int error_code);
 
-DBXCON *                mg_unpack_header              (unsigned char *input, unsigned char *output);
-int                     mg_unpack_arguments           (DBXCON *pcon);
-int                     mg_global_reference           (DBXCON *pcon);
-int                     mg_function_reference         (DBXCON *pcon, DBXFUN *pfun);
-int                     mg_class_reference            (DBXCON *pcon, short context);
+DBXMETH *               mg_unpack_header              (unsigned char *input, unsigned char *output);
+int                     mg_unpack_arguments           (DBXMETH *pmeth);
+int                     mg_global_reference           (DBXMETH *pmeth);
+int                     mg_function_reference         (DBXMETH *pmeth, DBXFUN *pfun);
+int                     mg_class_reference            (DBXMETH *pmeth, short context);
 int                     mg_add_block_size             (DBXSTR *block, unsigned long offset, unsigned long data_len, int dsort, int dtype);
 unsigned long           mg_get_block_size             (DBXSTR *block, unsigned long offset, int *dsort, int *dtype);
 int                     mg_set_size                   (unsigned char *str, unsigned long data_len);
@@ -1120,7 +1216,7 @@ int                     mg_free                       (void *p, short id);
 
 int                     mg_ucase                      (char *string);
 int                     mg_lcase                      (char *string);
-int                     mg_create_string              (DBXCON *pcon, void *data, short type);
+int                     mg_create_string              (DBXMETH *pmeth, void *data, short type);
 int                     mg_log_init                   (DBXLOG *p_log);
 int                     mg_log_event                  (DBXLOG *p_log, char *message, char *title, int level);
 int                     mg_log_buffer                 (DBXLOG *p_log, char *buffer, int buffer_len, char *title, int level);
@@ -1130,10 +1226,10 @@ DBXPROC                 mg_dso_sym                    (DBXPLIB p_library, char *
 int                     mg_dso_unload                 (DBXPLIB p_library);
 DBXTHID                 mg_current_thread_id          (void);
 unsigned long           mg_current_process_id         (void);
-int                     mg_error_message              (DBXCON *pcon, int error_code);
-int                     mg_set_error_message          (DBXCON *pcon);
+int                     mg_error_message              (DBXMETH *pmeth, int error_code);
+int                     mg_set_error_message          (DBXMETH *pmeth);
 int                     mg_set_error_message_ex       (unsigned char *output, char *error_message);
-int                     mg_cleanup                    (DBXCON *pcon);
+int                     mg_cleanup                    (DBXMETH *pmeth);
 
 int                     mg_mutex_create               (DBXMUTEX *p_mutex);
 int                     mg_mutex_lock                 (DBXMUTEX *p_mutex, int timeout);
@@ -1149,7 +1245,7 @@ int                     mg_sleep                      (unsigned long msecs);
 int                     netx_load_winsock             (DBXCON *pcon, int context);
 int                     netx_tcp_connect              (DBXCON *pcon, int context);
 int                     netx_tcp_handshake            (DBXCON *pcon, int context);
-int                     netx_tcp_command              (DBXCON *pcon, int context);
+int                     netx_tcp_command              (DBXMETH *pmeth, int context);
 int                     netx_tcp_connect_ex           (DBXCON *pcon, xLPSOCKADDR p_srv_addr, socklen_netx srv_addr_len, int timeout);
 int                     netx_tcp_disconnect           (DBXCON *pcon, int context);
 int                     netx_tcp_write                (DBXCON *pcon, unsigned char *data, int size);
@@ -1159,7 +1255,7 @@ int                     netx_get_error_message        (int error_code, char *mes
 int                     netx_get_std_error_message    (int error_code, char *message, int size, int context);
 
 
-int                     mg_db_command                 (DBXCON *pcon, int context);
+int                     mg_db_command                 (DBXMETH *pmeth, int context);
 int                     mg_db_connect                 (MGSRV *p_srv, int *chndle, short context);
 int                     mg_db_disconnect              (MGSRV *p_srv, int chndle, short context);
 int                     mg_db_send                    (MGSRV *p_srv, int chndle, MGBUF *p_buf, int mode);
