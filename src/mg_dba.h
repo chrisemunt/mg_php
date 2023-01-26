@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2017-2021 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2017-2023 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -110,8 +110,8 @@
 #endif
 
 
-#ifndef INCL_WINSOCK_API_TYPEDEFS
-#define MG_USE_MS_TYPEDEFS 1
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 /* Cache/IRIS */
@@ -215,7 +215,17 @@ typedef struct {
 /* YottaDB */
 
 #define YDB_OK       0
+#define YDB_FAILURE -1
 #define YDB_DEL_TREE 1
+
+typedef int                ydb_int_t;
+typedef unsigned int       ydb_uint_t;
+typedef long               ydb_long_t;
+typedef unsigned long      ydb_ulong_t;
+typedef float              ydb_float_t;
+typedef double             ydb_double_t;
+typedef char               ydb_char_t;
+typedef int                (*ydb_tpfnptr_t) (void *tpfnparm);  
 
 #define YDB_INT_MAX        ((int)0x7fffffff)
 #define YDB_TP_RESTART     (YDB_INT_MAX - 1)
@@ -286,7 +296,8 @@ typedef int    xc_status_t;
 #define DBX_DSORT_STATUS         10
 #define DBX_DSORT_ERROR          11
 
-#define DBX_DSORT_ISVALID(a)     ((a == DBX_DSORT_GLOBAL) || (a == DBX_DSORT_SUBSCRIPT) || (a == DBX_DSORT_DATA) || (a == DBX_DSORT_EOD) || (a == DBX_DSORT_STATUS))
+/* v1.3.12 */
+#define DBX_DSORT_ISVALID(a)     ((a == DBX_DSORT_GLOBAL) || (a == DBX_DSORT_SUBSCRIPT) || (a == DBX_DSORT_DATA) || (a == DBX_DSORT_EOD) || (a == DBX_DSORT_STATUS) || (a == DBX_DSORT_ERROR))
 
 #define DBX_DTYPE_NONE           0
 #define DBX_DTYPE_DBXSTR         1
@@ -297,11 +308,52 @@ typedef int    xc_status_t;
 #define DBX_DTYPE_OREF           7
 #define DBX_DTYPE_NULL           10
 
+#define DBX_CMND_OPEN            1
+#define DBX_CMND_CLOSE           2
+#define DBX_CMND_NSGET           3
+#define DBX_CMND_NSSET           4
+
+#define DBX_CMND_GSET            11
+#define DBX_CMND_GGET            12
+#define DBX_CMND_GNEXT           13
+#define DBX_CMND_GNEXTDATA       131
+#define DBX_CMND_GPREVIOUS       14
+#define DBX_CMND_GPREVIOUSDATA   141
+#define DBX_CMND_GDELETE         15
+#define DBX_CMND_GDEFINED        16
+#define DBX_CMND_GINCREMENT      17
+/* v1.3.13 */
+#define DBX_CMND_GLOCK           18
+#define DBX_CMND_GUNLOCK         19
+#define DBX_CMND_GMERGE          20
+
+#define DBX_CMND_GNNODE          21
+#define DBX_CMND_GNNODEDATA      211
+#define DBX_CMND_GPNODE          22
+#define DBX_CMND_GPNODEDATA      221
+
+#define DBX_CMND_FUNCTION        31
+
+#define DBX_CMND_CCMETH          41
+#define DBX_CMND_CGETP           42
+#define DBX_CMND_CSETP           43
+#define DBX_CMND_CMETH           44
+#define DBX_CMND_CCLOSE          45
+
+#define DBX_CMND_TSTART          61
+#define DBX_CMND_TLEVEL          62
+#define DBX_CMND_TCOMMIT         63
+#define DBX_CMND_TROLLBACK       64
+
 #define DBX_MAXSIZE              32767
 #define DBX_BUFFER               32768
 
 #define DBX_LS_MAXSIZE           3641144
 #define DBX_LS_BUFFER            3641145
+
+/* v1.3.14 */
+#define DBX_YDB_MAXSIZE          1048576
+#define DBX_YDB_BUFFER           1048577
 
 #if defined(MAX_PATH) && (MAX_PATH>511)
 #define DBX_MAX_PATH             MAX_PATH
@@ -771,6 +823,8 @@ typedef struct tagDBXCVAL {
 
 typedef struct tagDBXVAL {
    short          type;
+   short          sort; /* v1.3.16 */
+   short          realloc;
    union {
       int            int32;
       long long      int64;
@@ -1008,6 +1062,8 @@ typedef struct tagDBXMETH {
    short          done;
    short          lock;
    short          increment;
+   short          merge;
+   short          getdata; /* v1.3.13 */
    int            binary;
    int            argc;
    DBXSTR         input_str;
@@ -1064,6 +1120,7 @@ typedef struct tagDBXTHRT {
 #define MG_TX_AKEY               1
 #define MG_TX_AREC               2
 #define MG_TX_EOD                3
+#define MG_TX_OREF               5
 #define MG_TX_AREC_FORMATTED     9
 
 #define MG_RECV_HEAD             8
@@ -1132,19 +1189,39 @@ DBX_EXTFUN(int)         dbx_version                   (int index, char *output, 
 DBX_EXTFUN(int)         dbx_open                      (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_close                     (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_set                       (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_set_x                     (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_set_ex                    (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_get                       (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_get_x                     (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_get_ex                    (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_next                      (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_next_x                    (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_data                 (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_next_data_x               (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_next_ex                   (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_previous                  (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_previous_x                (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_previous_data             (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_previous_data_x           (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_previous_ex               (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_delete                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_delete_x                  (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_delete_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_defined                   (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_defined_x                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_defined_ex                (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_increment                 (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_increment_x               (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_increment_ex              (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_merge                     (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_merge_x                   (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_merge_ex                  (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_lock                      (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_lock_x                    (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_lock_ex                   (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_unlock                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_unlock_x                  (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_unlock_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tstart                    (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_tstart_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tlevel                    (unsigned char *input, unsigned char *output);
@@ -1154,10 +1231,14 @@ DBX_EXTFUN(int)         dbx_tcommit_ex                (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_trollback                 (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_trollback_ex              (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_function                  (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_function_x                (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_function_ex               (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_classmethod               (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_classmethod_x             (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_method                    (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_method_x                  (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_getproperty               (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_getproperty_x             (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_setproperty               (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_closeinstance             (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_getnamespace              (unsigned char *input, unsigned char *output);
@@ -1199,6 +1280,10 @@ int                     mg_unpack_arguments           (DBXMETH *pmeth);
 int                     mg_global_reference           (DBXMETH *pmeth);
 int                     mg_function_reference         (DBXMETH *pmeth, DBXFUN *pfun);
 int                     mg_class_reference            (DBXMETH *pmeth, short context);
+
+int                     mg_add_block_head             (DBXSTR *block, unsigned long buffer_size, unsigned long index);
+int                     mg_add_block_head_size        (DBXSTR *block, unsigned long data_len, int cmnd);
+int                     mg_add_block_data             (DBXSTR *block, unsigned char *data, unsigned long data_len, int dsort, int dtype);
 int                     mg_add_block_size             (DBXSTR *block, unsigned long offset, unsigned long data_len, int dsort, int dtype);
 unsigned long           mg_get_block_size             (DBXSTR *block, unsigned long offset, int *dsort, int *dtype);
 int                     mg_set_size                   (unsigned char *str, unsigned long data_len);
@@ -1282,6 +1367,10 @@ int                     mg_replace_substrings         (char * tbuffer, char *fbu
 int                     mg_bind_server_api            (MGSRV *p_srv, short context);
 int                     mg_release_server_api         (MGSRV *p_srv, short context);
 int                     mg_invoke_server_api          (MGSRV *p_srv, int chndle, MGBUF *p_buf, int size, int mode);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

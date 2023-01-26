@@ -4,7 +4,7 @@
    | Description: PHP Extension for M/Cache/IRIS                              |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2002-2021 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2002-2023 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -143,6 +143,10 @@ Version 3.2.57 18 February 2021:
 Version 3.2.58 14 March 2021:
    Introduce support for YottaDB Transaction Processing over API based connectivity.
    - This functionality was previously only available over network-based connectivity to YottaDB.
+
+Version 3.3.59 26 January 2023:
+   Port to PHP v8.0.x, v8.1.x and v8.2.x
+
 */
 
 #ifdef HAVE_CONFIG_H
@@ -345,6 +349,208 @@ ZEND_END_MODULE_GLOBALS(mg_php)
 # define MG_PHP_GLOBAL(v) (mg_php_globals.v)
 #endif
 
+/* v3.3.59 */
+#if PHP_MAJOR_VERSION >= 8
+
+ZEND_BEGIN_ARG_INFO(m_noargs_ainfo, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_onearg_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_set_log_level_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+   ZEND_ARG_INFO(0, input2)
+   ZEND_ARG_INFO(0, input3)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_set_error_mode_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+   ZEND_ARG_INFO(0, input2)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_set_host_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+   ZEND_ARG_INFO(0, input2)
+   ZEND_ARG_INFO(0, input3)
+   ZEND_ARG_INFO(0, input4)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_bind_server_api_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+   ZEND_ARG_INFO(0, input2)
+   ZEND_ARG_INFO(0, input3)
+   ZEND_ARG_INFO(0, input4)
+   ZEND_ARG_INFO(0, input5)
+   ZEND_ARG_INFO(0, input6)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_global_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+   ZEND_ARG_INFO(0, input2)
+   ZEND_ARG_INFO(0, input3)
+   ZEND_ARG_INFO(0, input4)
+   ZEND_ARG_INFO(0, input5)
+   ZEND_ARG_INFO(0, input6)
+   ZEND_ARG_INFO(0, input7)
+   ZEND_ARG_INFO(0, input8)
+   ZEND_ARG_INFO(0, input9)
+   ZEND_ARG_INFO(0, input10)
+   ZEND_ARG_INFO(0, input11)
+   ZEND_ARG_INFO(0, input12)
+   ZEND_ARG_INFO(0, input13)
+   ZEND_ARG_INFO(0, input14)
+   ZEND_ARG_INFO(0, input15)
+   ZEND_ARG_INFO(0, input16)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_varargs_ainfo, 1)
+   ZEND_ARG_INFO(0, input1)
+   ZEND_ARG_INFO(0, input2)
+   ZEND_ARG_INFO(0, input3)
+   ZEND_ARG_INFO(0, input4)
+   ZEND_ARG_INFO(0, input5)
+   ZEND_ARG_INFO(0, input6)
+   ZEND_ARG_INFO(0, input7)
+   ZEND_ARG_INFO(0, input8)
+   ZEND_ARG_INFO(0, input9)
+   ZEND_ARG_INFO(0, input10)
+   ZEND_ARG_INFO(0, input11)
+   ZEND_ARG_INFO(0, input12)
+   ZEND_ARG_INFO(0, input13)
+   ZEND_ARG_INFO(0, input14)
+   ZEND_ARG_INFO(0, input15)
+   ZEND_ARG_INFO(0, input16)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_proc_byref_ainfo, 1)
+   ZEND_ARG_INFO(0, input1) /* first argument can be a literal if zero */
+   ZEND_ARG_INFO(0, input2) /* second argument can be a literal if zero */
+   ZEND_ARG_INFO(1, input3)
+   ZEND_ARG_INFO(1, input4)
+   ZEND_ARG_INFO(1, input5)
+   ZEND_ARG_INFO(1, input6)
+   ZEND_ARG_INFO(1, input7)
+   ZEND_ARG_INFO(1, input8)
+   ZEND_ARG_INFO(1, input9)
+   ZEND_ARG_INFO(1, input10)
+   ZEND_ARG_INFO(1, input11)
+   ZEND_ARG_INFO(1, input12)
+   ZEND_ARG_INFO(1, input13)
+   ZEND_ARG_INFO(1, input14)
+   ZEND_ARG_INFO(1, input15)
+   ZEND_ARG_INFO(1, input16)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_method_byref_ainfo, 1)
+   ZEND_ARG_INFO(0, input1) /* first argument can be a literal if zero */
+   ZEND_ARG_INFO(0, input2) /* second argument can be a literal if zero */
+   ZEND_ARG_INFO(1, input3)
+   ZEND_ARG_INFO(1, input4)
+   ZEND_ARG_INFO(1, input5)
+   ZEND_ARG_INFO(1, input6)
+   ZEND_ARG_INFO(1, input7)
+   ZEND_ARG_INFO(1, input8)
+   ZEND_ARG_INFO(1, input9)
+   ZEND_ARG_INFO(1, input10)
+   ZEND_ARG_INFO(1, input11)
+   ZEND_ARG_INFO(1, input12)
+   ZEND_ARG_INFO(1, input13)
+   ZEND_ARG_INFO(1, input14)
+   ZEND_ARG_INFO(1, input15)
+   ZEND_ARG_INFO(1, input16)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_array_test_ainfo, 1)
+   ZEND_ARG_INFO(1, input1)
+   ZEND_ARG_INFO(1, input2)
+   ZEND_ARG_INFO(1, input3)
+   ZEND_ARG_INFO(1, input4)
+   ZEND_ARG_INFO(1, input5)
+   ZEND_ARG_INFO(1, input6)
+   ZEND_ARG_INFO(1, input7)
+   ZEND_ARG_INFO(1, input8)
+   ZEND_ARG_INFO(1, input9)
+   ZEND_ARG_INFO(1, input10)
+   ZEND_ARG_INFO(1, input11)
+   ZEND_ARG_INFO(1, input12)
+   ZEND_ARG_INFO(1, input13)
+   ZEND_ARG_INFO(1, input14)
+   ZEND_ARG_INFO(1, input15)
+   ZEND_ARG_INFO(1, input16)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(m_merge_from_db_byref_ainfo, 1)
+   ZEND_ARG_INFO(0, input1) /* first argument can be a literal if zero */
+   ZEND_ARG_INFO(0, input2) /* second argument can be a literal if zero */
+   ZEND_ARG_INFO(1, input3)
+   ZEND_ARG_INFO(1, input4)
+   ZEND_ARG_INFO(1, input5)
+   ZEND_ARG_INFO(1, input6)
+   ZEND_ARG_INFO(1, input7)
+   ZEND_ARG_INFO(1, input8)
+   ZEND_ARG_INFO(1, input9)
+   ZEND_ARG_INFO(1, input10)
+   ZEND_ARG_INFO(1, input11)
+   ZEND_ARG_INFO(1, input12)
+   ZEND_ARG_INFO(1, input13)
+   ZEND_ARG_INFO(1, input14)
+   ZEND_ARG_INFO(1, input15)
+   ZEND_ARG_INFO(1, input16)
+   ZEND_END_ARG_INFO()
+
+static const zend_function_entry mg_functions[] =
+{
+    PHP_FE(m_test, m_noargs_ainfo)
+    PHP_FE(m_dump_trace, m_noargs_ainfo)
+    PHP_FE(m_ext_version, m_noargs_ainfo)
+    PHP_FE(m_set_log_level, m_set_log_level_ainfo)
+    PHP_FE(m_set_error_mode, m_set_error_mode_ainfo)
+    PHP_FE(m_set_storage_mode, m_onearg_ainfo)
+    PHP_FE(m_set_timeout, m_onearg_ainfo)
+    PHP_FE(m_set_no_retry, m_onearg_ainfo)
+    PHP_FE(m_set_host, m_set_host_ainfo)
+    PHP_FE(m_set_server, m_onearg_ainfo)
+    PHP_FE(m_set_uci, m_onearg_ainfo)
+#if !defined(MG_PHP_MGW)
+    PHP_FE(m_bind_server_api, m_bind_server_api_ainfo)
+    PHP_FE(m_release_server_api, m_noargs_ainfo)
+#endif
+    PHP_FE(m_get_last_error, m_noargs_ainfo)
+    PHP_FE(m_set, m_global_ainfo)
+    PHP_FE(m_get, m_global_ainfo)
+    PHP_FE(m_delete, m_global_ainfo)
+    PHP_FE(m_kill, m_global_ainfo)
+    PHP_FE(m_defined, m_global_ainfo)
+    PHP_FE(m_data, m_global_ainfo)
+    PHP_FE(m_order, m_global_ainfo)
+    PHP_FE(m_previous, m_global_ainfo)
+    PHP_FE(m_increment, m_global_ainfo)
+    PHP_FE(m_tstart, m_onearg_ainfo)
+    PHP_FE(m_tlevel, m_onearg_ainfo)
+    PHP_FE(m_tcommit, m_onearg_ainfo)
+    PHP_FE(m_trollback, m_onearg_ainfo)
+    PHP_FE(m_sleep, m_onearg_ainfo)
+    PHP_FE(m_html, m_varargs_ainfo)
+    PHP_FE(m_html_method, m_varargs_ainfo)
+    PHP_FE(m_http, m_varargs_ainfo)
+    PHP_FE(m_function, m_varargs_ainfo)
+    PHP_FE(m_proc, m_varargs_ainfo)
+    PHP_FE(m_proc_ex, m_varargs_ainfo)
+    PHP_FE(m_proc_byref, m_proc_byref_ainfo)
+    PHP_FE(m_classmethod, m_varargs_ainfo)
+    PHP_FE(m_method, m_varargs_ainfo)
+    PHP_FE(m_method_byref, m_method_byref_ainfo)
+    PHP_FE(m_merge_to_db, m_varargs_ainfo)
+    PHP_FE(m_merge_from_db, m_merge_from_db_byref_ainfo)
+    PHP_FE(m_return_to_applet, m_varargs_ainfo)
+    PHP_FE(m_return_to_client, m_varargs_ainfo)
+    PHP_FE(m_array_test, m_array_test_ainfo)
+    {NULL, NULL, NULL}
+};
+
+#else
 
 ZEND_BEGIN_ARG_INFO(m_proc_byref_ainfo, 1)
    ZEND_ARG_PASS_INFO(0) /* first argument can be a literal if zero */
@@ -471,6 +677,8 @@ static const zend_function_entry mg_functions[] =
     PHP_FE(m_array_test, m_array_test_ainfo)
     {NULL, NULL, NULL}
 };
+
+#endif /* #if PHP_MAJOR_VERSION >= 8 */
 
 
 /* compiled module information */
@@ -2017,7 +2225,7 @@ ZEND_FUNCTION(m_increment)
 /* }}} */
 
 
-/* {{{ proto string m_tstart()
+/* {{{ proto string m_tstart([string servername])
    Start a transaction */
 ZEND_FUNCTION(m_tstart)
 {
@@ -2081,7 +2289,7 @@ ZEND_FUNCTION(m_tstart)
 /* }}} */
 
 
-/* {{{ proto string m_tlevel()
+/* {{{ proto string m_tlevel([string servername])
    Return the current transaction level */
 ZEND_FUNCTION(m_tlevel)
 {
@@ -2145,7 +2353,7 @@ ZEND_FUNCTION(m_tlevel)
 /* }}} */
 
 
-/* {{{ proto string m_tcommit()
+/* {{{ proto string m_tcommit([string servername])
    Commit a transaction */
 ZEND_FUNCTION(m_tcommit)
 {
@@ -2209,7 +2417,7 @@ ZEND_FUNCTION(m_tcommit)
 /* }}} */
 
 
-/* {{{ proto string m_trollback()
+/* {{{ proto string m_trollback([string servername])
    Rollback a transaction */
 ZEND_FUNCTION(m_trollback)
 {
@@ -4572,7 +4780,11 @@ int mg_array_add_record(zval *ppa, MGAREC * p_arec, int mode)
    zval *ppk[MG_MAXKEY];
    HashTable *ht[MG_MAXKEY];
 
+/* v3.3.59 */
+#if PHP_MAJOR_VERSION >= 8
+#else
    TSRMLS_FETCH();
+#endif
 
    if (p_arec->kn < 1) {
       return 0;
@@ -4805,7 +5017,11 @@ __try {
    p_keyx->krec[0] = ((unsigned char *) p_keyx) + sizeof(MGAKEYX);
    p_keyx->kmemoffs[0] = 0;
 
+/* v3.3.59 */
+#if PHP_MAJOR_VERSION >= 8
+#else
    TSRMLS_FETCH();
+#endif
 
    phase = 1;
    mg_request_add(p_page->p_srv, chndle, p_buf, NULL, 0, byref, MG_TX_AREC);
