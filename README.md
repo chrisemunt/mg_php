@@ -3,9 +3,9 @@
 A PHP Extension for InterSystems **Cache/IRIS** and **YottaDB**.
 
 Chris Munt <cmunt@mgateway.com>  
-26 January 2023, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+26 March 2023, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Current Release: Version: 3.3; Revision 59.
+* Current Release: Version: 3.3; Revision 60.
 * Verified to work with PHP versions up to (and including) v8.2.x.
 * Two connectivity models to the InterSystems or YottaDB database are provided: High performance via the local database API or network based.
 * [Release Notes](#relnotes) can be found at the end of this document.
@@ -546,3 +546,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 ### v3.3.59 (26 January 2023)
 
 * Introduce support for PHP v8.0.x, v8.1.x and v8.2.x.
+
+### v3.3.60 (26 March 2023)
+
+* Properly terminate strings returned from the YottaDB API.
