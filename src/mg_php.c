@@ -1539,6 +1539,7 @@ ZEND_FUNCTION(m_bind_server_api)
    buffer[60] = '\0';
 
    result = mg_bind_server_api(p_page->p_srv, 0);
+   sprintf(buffer, "%d", result); /* v3.3.60 */
 
    if (!result) {
       if (!strlen(p_page->p_srv->error_mess)) {
@@ -1547,7 +1548,8 @@ ZEND_FUNCTION(m_bind_server_api)
       MG_ERROR1(p_page->p_srv->error_mess);
    }
 
-   MG_RETURN_STRING_AND_FREE_BUF("", 1);
+   /* v3.3.60 */
+   MG_RETURN_STRING_AND_FREE_BUF(buffer, 1);
 
 }
 /* }}} */
