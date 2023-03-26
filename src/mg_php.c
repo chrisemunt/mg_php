@@ -147,6 +147,9 @@ Version 3.2.58 14 March 2021:
 Version 3.3.59 26 January 2023:
    Port to PHP v8.0.x, v8.1.x and v8.2.x
 
+Version 3.3.60 26 March 2023:
+   Properly terminate strings returned from the YottaDB API.
+
 */
 
 #ifdef HAVE_CONFIG_H
