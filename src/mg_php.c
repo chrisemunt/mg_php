@@ -4,7 +4,7 @@
    | Description: PHP Extension for M/Cache/IRIS                              |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2002-2023 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2019-2023 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -149,6 +149,9 @@ Version 3.3.59 26 January 2023:
 
 Version 3.3.60 26 March 2023:
    Properly terminate strings returned from the YottaDB API.
+
+Version 3.3.60a 23 June 2023:
+   Documentation update.
 
 */
 
@@ -979,7 +982,7 @@ ZEND_FUNCTION(m_ext_version)
 
    }
 
-   sprintf(p_buf->p_buffer, "M/Gateway Developments Ltd. - " MG_EXT_NAME ": PHP Gateway to M - Version %s", PHP_MG_PHP_VERSION);
+   sprintf(p_buf->p_buffer, "MGateway Ltd. - " MG_EXT_NAME ": PHP Gateway to M - Version %s", PHP_MG_PHP_VERSION);
    p_buf->data_size = (unsigned long) strlen(p_buf->p_buffer);
 
    MG_RETURN_STRING_AND_FREE_BUF(p_buf->p_buffer, 1);
@@ -1539,7 +1542,6 @@ ZEND_FUNCTION(m_bind_server_api)
    buffer[60] = '\0';
 
    result = mg_bind_server_api(p_page->p_srv, 0);
-   sprintf(buffer, "%d", result); /* v3.3.60 */
 
    if (!result) {
       if (!strlen(p_page->p_srv->error_mess)) {
@@ -1548,8 +1550,7 @@ ZEND_FUNCTION(m_bind_server_api)
       MG_ERROR1(p_page->p_srv->error_mess);
    }
 
-   /* v3.3.60 */
-   MG_RETURN_STRING_AND_FREE_BUF(buffer, 1);
+   MG_RETURN_STRING_AND_FREE_BUF("", 1);
 
 }
 /* }}} */

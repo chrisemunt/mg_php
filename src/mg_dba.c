@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2017-2023 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2019-2023 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -90,9 +90,6 @@ Version 1.3.16 15 June 2022:
 
 Version 1.3.17 12 January 2023:
    Remove the need to prefix global names with the '^' character for API-based connections to YottaDB.
-
-Version 1.3.18 26 March 2023:
-   Properly terminate strings returned from the YottaDB API.
 
 */
 
@@ -8748,15 +8745,9 @@ int mg_invoke_server_api(MGSRV *p_srv, int chndle, MGBUF *p_buf, int size, int m
          /* v1.3.11 */
          if (rc == YDB_OK) {
             p_buf->data_size = (unsigned long) pfun->out.length;
-            /* v1.3.18 */
-            if (p_buf->data_size > 0)
-               p_buf->p_buffer[p_buf->data_size] = '\0';
-            else
-               p_buf->p_buffer[0] = '\0';
          }
          else {
             p_buf->data_size = 0;
-            p_buf->p_buffer[0] = '\0';
          }
       }
       result = 1;
