@@ -3,7 +3,7 @@
 A PHP Extension for InterSystems **Cache/IRIS** and **YottaDB**.
 
 Chris Munt <cmunt@mgateway.com>  
-26 March 2023, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+23 June 2023, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
 * Current Release: Version: 3.3; Revision 60.
 * Verified to work with PHP versions up to (and including) v8.2.x.
@@ -123,8 +123,8 @@ Change to your development Namespace and check the installation:
 
        do ^%zmgsi
 
-       M/Gateway Developments Ltd - Service Integration Gateway
-       Version: 4.5; Revision 27 (1 March 2022)
+       MGateway Ltd - Service Integration Gateway
+       Version: 4.5; Revision 28 (3 February 2023)
 
 
 #### Installation for YottaDB
@@ -152,8 +152,8 @@ Link all the **zmgsi** routines and check the installation:
 
        do ^%zmgsi
 
-       M/Gateway Developments Ltd - Service Integration Gateway
-       Version: 4.5; Revision 27 (1 March 2022)
+       MGateway Ltd - Service Integration Gateway
+       Version: 4.5; Revision 28 (3 February 2023)
 
 Note that the version of **zmgsi** is successfully displayed.
 
@@ -229,7 +229,7 @@ Before invoking database functionality,the following simple script can be used t
 
 This should return something like:
 
-       M/Gateway Developments Ltd. - mg_php: PHP Gateway to M - Version 3.3.59
+       MGateway Ltd. - mg_php: PHP Gateway to M - Version 3.3.60
 
 ### Connecting the database via the network.
 
@@ -336,7 +336,7 @@ Before invoking database functionality,the following simple script can be used t
 
 This should return something like:
 
-       M/Gateway Developments Ltd. - mg_php: PHP Gateway to M - Version 3.3.59
+       MGateway Ltd. - mg_php: PHP Gateway to M - Version 3.3.60
 
 Now consider the following database script:
 
@@ -504,7 +504,7 @@ Example (Encode a date to internal storage format):
 
 ## <a name="license">License</a>
 
-Copyright (c) 2018-2023 M/Gateway Developments Ltd,
+Copyright (c) 2018-2023 MGateway Ltd,
 Surrey UK.                                                      
 All rights reserved.
  
@@ -550,3 +550,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 ### v3.3.60 (26 March 2023)
 
 * Properly terminate strings returned from the YottaDB API.
+
+### v3.3.60a (23 June 2023)
+
+* Documentation update.
