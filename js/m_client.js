@@ -1,5 +1,5 @@
 // (CM) Client for the m_* technologies implemented over XMLHTTP.  7 January 2005.
-//      Copyright (c) 2002 - 2019 by M/Gateway Developments Ltd.
+//      Copyright (c) 2002 - 2023 by MGateway Ltd.
 //      All Rights Reserved.
 //
 //      Revised 13 June 2019
