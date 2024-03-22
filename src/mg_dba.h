@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2019-2023 MGateway Ltd                                     |
+   | Copyright (c) 2019-2024 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -36,6 +36,7 @@
 /* Check for MS compiler later than VC6 */
 #if (_MSC_VER >= 1400)
 #define _CRT_SECURE_NO_DEPRECATE    1
+#define _CRT_SECURE_NO_WARNINGS     1
 #define _CRT_NONSTDC_NO_DEPRECATE   1
 #endif
 #endif
@@ -119,7 +120,7 @@ extern "C" {
 #define CACHE_MAXSTRLEN	32767
 #define CACHE_MAXLOSTSZ	3641144
 
-typedef char		Callin_char_t;
+typedef char   Callin_char_t;
 #define CACHE_INT64 long long
 #define CACHESTR	CACHE_ASTR
 
@@ -234,6 +235,9 @@ typedef int                (*ydb_tpfnptr_t) (void *tpfnparm);
 #define YDB_LOCK_TIMEOUT   (YDB_INT_MAX - 4)
 #define YDB_NOTOK          (YDB_INT_MAX - 5)
 
+#define YDB_ERR_PARAMINVALID  -151027770
+#define YDB_ERR_NODEEND       -151027922
+
 #define YDB_MAX_TP         32
 #define YDB_TPCTX_DB       1
 #define YDB_TPCTX_TLEVEL   2
@@ -279,10 +283,12 @@ typedef int    xc_status_t;
 #define DBX_DBTYPE_CACHE         1
 #define DBX_DBTYPE_IRIS          2
 #define DBX_DBTYPE_YOTTADB       5
+#define DBX_DBTYPE_JSPROXY       7
 #define DBX_DBTYPE_GTM           11
 
 #define DBX_MAXCONS              32
 #define DBX_MAXARGS              64
+#define DBX_MAXKEYSIZE           1024
 
 #define DBX_ERROR_SIZE           512
 
@@ -340,10 +346,22 @@ typedef int    xc_status_t;
 #define DBX_CMND_CMETH           44
 #define DBX_CMND_CCLOSE          45
 
+#define DBX_CMND_GNAMENEXT       51
+#define DBX_CMND_GNAMEPREVIOUS   52
+
 #define DBX_CMND_TSTART          61
 #define DBX_CMND_TLEVEL          62
 #define DBX_CMND_TCOMMIT         63
 #define DBX_CMND_TROLLBACK       64
+
+#define DBX_CMND_SQLEXEC         71
+#define DBX_CMND_SQLROW          72
+#define DBX_CMND_SQLCLEANUP      73
+
+#define DBX_CMND_TIMEOUT         101
+#define DBX_CMND_CHARSET         102
+#define DBX_CMND_LOGLEVEL        103
+#define DBX_CMND_LOGMESSAGE      104
 
 #define DBX_MAXSIZE              32767
 #define DBX_BUFFER               32768
@@ -472,6 +490,9 @@ typedef int    (* MG_FREE)       (void *p);
 #define  NETX_FD_ISSET(fd, set)              netx_so.p_WSAFDIsSet((SOCKET)(fd), (fd_set *)(set))
 
 typedef int (WINAPI * MG_LPFN_WSAFDISSET)       (SOCKET, fd_set *);
+
+typedef __int32            int32_t;
+typedef unsigned __int32   uint32_t;
 
 typedef DWORD           DBXTHID;
 typedef HINSTANCE       DBXPLIB;
@@ -820,6 +841,12 @@ typedef struct tagDBXCVAL {
    CACHE_EXSTR    zstr;
 } DBXCVAL, *PDBXCVAL;
 
+typedef struct tagDBXSTR16 {
+   unsigned int   len_alloc;
+   unsigned int   len_used;
+   unsigned short *buf_addr;
+} DBXSTR16, *PDBXSTR16;
+
 
 typedef struct tagDBXVAL {
    short          type;
@@ -833,7 +860,8 @@ typedef struct tagDBXVAL {
    } num;
    unsigned long  offset;
    DBXSTR         svalue;
-   DBXCVAL cvalue;
+   DBXSTR16       svalue16; /* v1.4.18 */
+   DBXCVAL        cvalue;
 } DBXVAL, *PDBXVAL;
 
 
@@ -900,6 +928,7 @@ typedef struct tagDBXISCSO {
    int               (* p_CachePopInt64)                 (CACHE_INT64 * nump);
 
    int               (* p_CachePushGlobal)               (int nlen, const Callin_char_t * nptr);
+   int               (* p_CachePushGlobalW)              (int nlen, const unsigned short * nptr);
    int               (* p_CachePushGlobalX)              (int nlen, const Callin_char_t * nptr, int elen, const Callin_char_t * eptr);
    int               (* p_CacheGlobalGet)                (int narg, int flag);
    int               (* p_CacheGlobalSet)                (int narg);
@@ -914,14 +943,17 @@ typedef struct tagDBXISCSO {
    int               (* p_CacheReleaseAllLocks)          (void);
    int               (* p_CacheReleaseLock)              (int nsub, int flg);
    int               (* p_CachePushLock)                 (int nlen, const Callin_char_t * nptr);
+   int               (* p_CachePushLockW)                (int nlen, const unsigned short * nptr);
 
    int               (* p_CacheAddGlobal)                (int num, const Callin_char_t * nptr);
+   int               (* p_CacheAddGlobalW)               (int num, const unsigned short * nptr);
    int               (* p_CacheAddGlobalDescriptor)      (int num);
    int               (* p_CacheAddSSVN)                  (int num, const Callin_char_t * nptr);
    int               (* p_CacheAddSSVNDescriptor)        (int num);
    int               (* p_CacheMerge)                    (void);
 
    int               (* p_CachePushFunc)                 (unsigned int * rflag, int tlen, const Callin_char_t * tptr, int nlen, const Callin_char_t * nptr);
+   int               (* p_CachePushFuncW)                (unsigned int * rflag, int tlen, const unsigned short * tptr, int nlen, const unsigned short * nptr);
    int               (* p_CacheExtFun)                   (unsigned int flags, int narg);
    int               (* p_CachePushRtn)                  (unsigned int * rflag, int tlen, const Callin_char_t * tptr, int nlen, const Callin_char_t * nptr);
    int               (* p_CacheDoFun)                    (unsigned int flags, int narg);
@@ -933,11 +965,14 @@ typedef struct tagDBXISCSO {
    int               (* p_CachePushOref)                 (unsigned int oref);
    int               (* p_CacheInvokeMethod)             (int narg);
    int               (* p_CachePushMethod)               (unsigned int oref, int mlen, const Callin_char_t * mptr, int flg);
+   int               (* p_CachePushMethodW)              (unsigned int oref, int mlen, const unsigned short * mptr, int flg);
    int               (* p_CacheInvokeClassMethod)        (int narg);
    int               (* p_CachePushClassMethod)          (int clen, const Callin_char_t * cptr, int mlen, const Callin_char_t * mptr, int flg);
+   int               (* p_CachePushClassMethodW)         (int clen, const unsigned short * cptr, int mlen, const unsigned short * mptr, int flg);
    int               (* p_CacheGetProperty)              (void);
    int               (* p_CacheSetProperty)              (void);
    int               (* p_CachePushProperty)             (unsigned int oref, int plen, const Callin_char_t * pptr);
+   int               (* p_CachePushPropertyW)            (unsigned int oref, int plen, const unsigned short * pptr);
 
    int               (* p_CacheType)                     (void);
 
@@ -1016,6 +1051,9 @@ typedef struct tagDBXCON {
    int            error_code;
    char           error[DBX_ERROR_SIZE];
    short          use_db_mutex;
+   short          utf16; /* v1.4.18 */
+   char           charset[16]; /* v1.5.20 */
+   short          use_tcp; /* v1.5.21 */
    DBXMUTEX       *p_db_mutex;
    DBXMUTEX       db_mutex;
    DBXZV          *p_zv;
@@ -1064,13 +1102,20 @@ typedef struct tagDBXMETH {
    short          increment;
    short          merge;
    short          getdata; /* v1.3.13 */
+   short          direction; /* v1.4.18 */
+   int            cmnd; /* v1.4.18 */
    int            binary;
    int            argc;
+   int            keyn; /* v1.4.18 */
+   int            keyn_next; /* v1.4.18 */
    DBXSTR         input_str;
+   DBXSTR16       input_str16; /* v1.5.20 */
    DBXVAL         output_val;
+   DBXVAL         data_val;
    int            offset;
    DBXVAL         args[DBX_MAXARGS];
    ydb_buffer_t   yargs[DBX_MAXARGS];
+   ydb_buffer_t   yargs_next[DBX_MAXARGS]; /* v1.4.18 */
    char           command[4];
    int            (* p_dbxfun) (struct tagDBXMETH * pmeth);
    DBXCON         *pcon;
@@ -1198,12 +1243,20 @@ DBX_EXTFUN(int)         dbx_next                      (unsigned char *input, uns
 DBX_EXTFUN(int)         dbx_next_x                    (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_next_data                 (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_next_data_x               (DBXMETH *pmeth);
-DBX_EXTFUN(int)         dbx_next_ex                   (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_previous                  (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_previous_x                (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_previous_data             (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_previous_data_x           (DBXMETH *pmeth);
-DBX_EXTFUN(int)         dbx_previous_ex               (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_ex                   (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_node                 (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_next_node_x               (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_node_data            (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_next_node_data_x          (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_previous_node             (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_previous_node_x           (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_previous_node_data        (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_previous_node_data_x      (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_node_ex              (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_delete                    (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_delete_x                  (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_delete_ex                 (DBXMETH *pmeth);
@@ -1222,6 +1275,11 @@ DBX_EXTFUN(int)         dbx_lock_ex                   (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_unlock                    (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_unlock_x                  (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_unlock_ex                 (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_gname                (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_next_gname_x              (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_previous_gname            (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_previous_gname_x          (DBXMETH *pmeth);
+DBX_EXTFUN(int)         dbx_next_gname_ex             (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tstart                    (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_tstart_ex                 (DBXMETH *pmeth);
 DBX_EXTFUN(int)         dbx_tlevel                    (unsigned char *input, unsigned char *output);
@@ -1243,6 +1301,10 @@ DBX_EXTFUN(int)         dbx_setproperty               (unsigned char *input, uns
 DBX_EXTFUN(int)         dbx_closeinstance             (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_getnamespace              (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_setnamespace              (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_timeout                   (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_charset                   (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_loglevel                  (unsigned char *input, unsigned char *output);
+DBX_EXTFUN(int)         dbx_logmessage                (unsigned char *input, unsigned char *output);
 DBX_EXTFUN(int)         dbx_sleep                     (int period_ms);
 DBX_EXTFUN(int)         dbx_benchmark                 (unsigned char *inputstr, unsigned char *outputstr);
 
@@ -1278,8 +1340,10 @@ int                     gtm_error_message             (DBXMETH *pmeth, int error
 DBXMETH *               mg_unpack_header              (unsigned char *input, unsigned char *output);
 int                     mg_unpack_arguments           (DBXMETH *pmeth);
 int                     mg_global_reference           (DBXMETH *pmeth);
-int                     mg_function_reference         (DBXMETH *pmeth, DBXFUN *pfun);
 int                     mg_class_reference            (DBXMETH *pmeth, short context);
+int                     mg_function_reference         (DBXMETH *pmeth, DBXFUN *pfun);
+int                     mg_parse_global_reference     (DBXMETH *pmeth, DBXVAL *output_val, char *global_ref, int global_ref_len);
+int                     mg_parse_global_reference16   (DBXMETH *pmeth, DBXVAL *output_val, unsigned short *global_ref, int global_ref_len);
 
 int                     mg_add_block_head             (DBXSTR *block, unsigned long buffer_size, unsigned long index);
 int                     mg_add_block_head_size        (DBXSTR *block, unsigned long data_len, int cmnd);
@@ -1367,6 +1431,9 @@ int                     mg_replace_substrings         (char * tbuffer, char *fbu
 int                     mg_bind_server_api            (MGSRV *p_srv, short context);
 int                     mg_release_server_api         (MGSRV *p_srv, short context);
 int                     mg_invoke_server_api          (MGSRV *p_srv, int chndle, MGBUF *p_buf, int size, int mode);
+
+size_t                  mg_utf8_to_utf16              (unsigned short *dest, size_t sz, const char *src, size_t srcsz);
+size_t                  mg_utf16_to_utf8              (char *dest, size_t sz, const unsigned short *src, size_t srcsz);
 
 #ifdef __cplusplus
 }

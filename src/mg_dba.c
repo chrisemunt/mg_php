@@ -5,7 +5,7 @@
    |              and YottaDB API                                             |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2019-2023 MGateway Ltd                                     |
+   | Copyright (c) 2019-2024 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -91,6 +91,23 @@ Version 1.3.16 15 June 2022:
 Version 1.3.17 12 January 2023:
    Remove the need to prefix global names with the '^' character for API-based connections to YottaDB.
 
+Version 1.4.18 10 November 2023:
+   Add functions to support cursor operations in mg-dbx-napi
+   - dbx_next_node and dbx_next_node_data
+   - dbx_previous_node and dbx_previous_node_data
+   - dbx_next_gname and dbx_previous_gname
+
+Version 1.4.19 18 November 2023:
+   Correct a fault in the operation to return a global directory listing from YottaDB.
+
+Version 1.5.20 8 December 2023:
+   Introduce native Unicode support - as character set/encoding UTF-16.
+
+Version 1.5.21 12 March 2024:
+   Introduce the supporting functionality for a JavaScript based Superserver.
+
+Version 1.5.22 19 March 2024:
+   Support the M merge command using API functions provided by YottaDB (rather than M code).
 */
 
 
@@ -103,6 +120,24 @@ extern int errno;
 
 static NETXSOCK      netx_so        = {0, 0, 0, 0, 0, 0, 0, {'\0'}};
 static DBXCON *      connection[DBX_MAXCONS];
+
+#define dbx_isutf(c) (((c)&0xC0) != 0x80)
+
+static const uint32_t dbx_offsets_from_utf8[6] = {
+    0x00000000UL, 0x00003080UL, 0x000E2080UL,
+    0x03C82080UL, 0xFA082080UL, 0x82082080UL
+};
+
+static const char dbx_trailing_bytes_for_utf8[256] = {
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 3,3,3,3,3,3,3,3,4,4,4,4,5,5,5,5
+};
 
 MG_MALLOC            dbx_ext_malloc = NULL;
 MG_REALLOC           dbx_ext_realloc = NULL;
@@ -178,6 +213,41 @@ DBX_EXTFUN(int) dbx_version(int index, char *output, int output_len)
       }
    }
 
+/* v1.5.20 */
+/*
+{
+   size_t utf16_len, utf8_len, len, n;
+   unsigned short utf16[256];
+   unsigned char utf8[256], utf81[256];
+
+   strcpy(utf8, "AB\xE3\x81\x82\xE3\x81\x83" "C");
+
+   len = (size_t) strlen(utf8);
+   printf("\r\noriginal utf8 len=%lu", len);
+   for (n = 0; n < len; n ++) {
+      printf(" %x", (unsigned char) utf8[n]);
+   }
+
+   utf16_len = 255;
+   len = mg_utf8_to_utf16((unsigned short *) &utf16, utf16_len, utf8, (size_t) strlen(utf8));
+
+   printf("\r\nutf16 len=%lu", len);
+
+   for (n = 0; n < len; n ++) {
+      printf(" %lu", utf16[n]);
+   }
+
+   utf8_len = 255;
+   len = mg_utf16_to_utf8(utf81, 255, &utf16, len);
+
+   printf("\r\nutf8 len=%lu", len);
+
+   for (n = 0; n < len; n ++) {
+      printf(" %x", (unsigned char) utf81[n]);
+   }
+}
+*/
+
    return 0;
 }
 
@@ -185,7 +255,7 @@ DBX_EXTFUN(int) dbx_version(int index, char *output, int output_len)
 DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
 {
    int rc, n, chndle, len;
-   char buffer[1024], nstr[64];
+   char buffer[1024], nstr[64], use[8];
    DBXMETH *pmeth;
    DBXCON *pcon;
    char *p, *p1, *p2;
@@ -225,6 +295,7 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
    }
 
    pcon->tlevel = 0;
+   pcon->utf16 = 0; /* v1.5.20 */
    pcon->p_isc_so = NULL;
    pcon->p_ydb_so = NULL;
    pcon->p_srv = NULL;
@@ -260,6 +331,7 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
    pcon->ip_address[0] = '\0';
    pcon->port = 0;
    pcon->timeout = NETX_TIMEOUT;
+   pcon->use_tcp = 0;
 
    for (n = 0; n < pmeth->argc; n ++) {
 
@@ -352,31 +424,60 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
                pcon->timeout = NETX_TIMEOUT;
             }
             break;
+         case 14:
+            /* v1.5.20 */
+            len = (len < 16) ? len : 15;
+            strncpy(pcon->charset, p, len);
+            pcon->charset[len] = '\0';
+            mg_lcase(pcon->charset);
+            pcon->utf16 = 0;
+            if (!strcmp(pcon->charset, "utf-16")) {
+               pcon->utf16 = 1;
+            }
+            break;
+         case 15:
+            /* v1.5.21 */
+            len = (len < 8) ? len : 7;
+            strncpy(use, p, len);
+            use[len] = '\0';
+            mg_lcase(use);
+            pcon->use_tcp = 0;
+            if (!strcmp(use, "tcp") || !strcmp(use, "net")) {
+               pcon->use_tcp = 1;
+            }
+            break;
 
          default:
             break;
       }
    }
+   if (pcon->use_tcp == 0) { /* v1.5.21 */
+      if (!pcon->shdir[0] && pcon->ip_address[0] && pcon->port) {
+         pcon->use_tcp = 1;
+      }
+   }
 
-   p = buffer;
-   p2 = p;
-   while ((p2 = strstr(p, "\n"))) {
-      *p2 = '\0';
-      p1 = strstr(p, "=");
-      if (p1) {
-         *p1 = '\0';
-         p1 ++;
+   if (!pcon->use_tcp) {
+      p = buffer;
+      p2 = p;
+      while ((p2 = strstr(p, "\n"))) {
+         *p2 = '\0';
+         p1 = strstr(p, "=");
+         if (p1) {
+            *p1 = '\0';
+            p1 ++;
 #if defined(_WIN32)
-         SetEnvironmentVariable((LPCTSTR) p, (LPCTSTR) p1);
+            SetEnvironmentVariable((LPCTSTR) p, (LPCTSTR) p1);
 #else
-         /* printf("\nLinux : environment variable p=%s p1=%s;", p, p1); */
-         setenv(p, p1, 1);
+            /* printf("\nLinux : environment variable p=%s p1=%s;", p, p1); */
+            setenv(p, p1, 1);
 #endif
+         }
+         else {
+            break;
+         }
+         p = p2 + 1;
       }
-      else {
-         break;
-      }
-      p = p2 + 1;
    }
 
    if (!pcon->dbtype) {
@@ -385,7 +486,7 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
       goto dbx_open_exit;
    }
 
-   if (!pcon->shdir[0] && pcon->ip_address[0] && pcon->port) {
+   if (pcon->use_tcp) {
 
       if (strstr(pcon->server_software, "zmgwsi")) {
          pcon->p_srv = (void *) mg_malloc(sizeof(MGSRV), 0);
@@ -433,7 +534,6 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
 
          return rc;
       }
-
       rc = netx_tcp_connect(pcon, 0);
       if (rc != CACHE_SUCCESS) {
          pcon->connected = 0;
@@ -451,6 +551,10 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
          return rc;
       }
 
+      if (pcon->dbtype == DBX_DBTYPE_JSPROXY) { /* v1.5.21 node.js */
+         /* talking as a client to JS Proxy - send the open() command string and arguments */
+         rc = netx_tcp_command(pmeth, 0);
+      }
       pcon->connected = 2; /* network connection */
       mg_create_string(pmeth, (void *) &rc, DBX_DTYPE_INT);
 
@@ -699,6 +803,7 @@ DBX_EXTFUN(int) dbx_get_x(DBXMETH *pmeth)
    pmeth->merge = 0;
    pmeth->lock = 0;
    rc = mg_global_reference(pmeth);
+
    if (rc != CACHE_SUCCESS) {
       mg_error_message(pmeth, rc);
       goto dbx_get_exit;
@@ -795,6 +900,7 @@ DBX_EXTFUN(int) dbx_next_x(DBXMETH *pmeth)
    pmeth->increment = 0;
    pmeth->merge = 0;
    pmeth->lock = 0;
+   pmeth->direction = 1;
    rc = mg_global_reference(pmeth);
    if (rc != CACHE_SUCCESS) {
       mg_error_message(pmeth, rc);
@@ -859,6 +965,7 @@ DBX_EXTFUN(int) dbx_next_data_x(DBXMETH *pmeth)
    pmeth->increment = 0;
    pmeth->merge = 0;
    pmeth->lock = 0;
+   pmeth->direction = 1;
    rc = mg_global_reference(pmeth);
    if (rc != CACHE_SUCCESS) {
       mg_error_message(pmeth, rc);
@@ -892,86 +999,6 @@ dbx_next_data_exit:
 }
 
 
-DBX_EXTFUN(int) dbx_next_ex(DBXMETH *pmeth)
-{
-   int rc;
-   DBXCON *pcon = pmeth->pcon;
-
-   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
-      if (pmeth->getdata) {
-         DBXSTR str;
-
-         pmeth->output_val.svalue.len_used = 10;
-         pmeth->output_val.offset = 5;
-
-         str.buf_addr = (pmeth->output_val.svalue.buf_addr + pmeth->output_val.svalue.len_used);
-         str.len_alloc = pmeth->output_val.svalue.len_alloc;
-         str.len_used = 0;
-
-         rc = pcon->p_ydb_so->p_ydb_subscript_next_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &str);
-
-         mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) str.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-         pmeth->output_val.svalue.len_used += str.len_used;
-         pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
-         if (rc == CACHE_SUCCESS && str.len_used > 0) {
-            str.buf_addr = (pmeth->output_val.svalue.buf_addr + (pmeth->output_val.svalue.len_used + 5));
-            str.len_alloc = pmeth->output_val.svalue.len_alloc;
-            str.len_used = 0;
-            rc = pcon->p_ydb_so->p_ydb_get_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &str);
-            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) str.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-            pmeth->output_val.svalue.len_used += (str.len_used + 5);
-         }
-         else {
-            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-            pmeth->output_val.svalue.len_used += 5;
-         }
-         mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) (pmeth->output_val.svalue.len_used - 5), DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-      }
-      else {
-
-         pmeth->output_val.svalue.len_used = 0;
-         pmeth->output_val.svalue.buf_addr += 5;
-
-         rc = pcon->p_ydb_so->p_ydb_subscript_next_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &(pmeth->output_val.svalue));
-
-         pmeth->output_val.svalue.buf_addr -= 5;
-         mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) pmeth->output_val.svalue.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-      }
-   }
-   else {
-      rc = pcon->p_isc_so->p_CacheGlobalOrder(pmeth->argc - 1, 1, pmeth->getdata);
-      if (rc == CACHE_SUCCESS) {
-        if (pmeth->getdata) { /* v1.3.13 */
-            rc = isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
-            if (pmeth->output_val.svalue.len_used == 6 && pmeth->output_val.svalue.buf_addr[5] == '0') {
-               pmeth->output_val.svalue.len_used = 5;
-               pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
-               mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-               pmeth->output_val.svalue.len_used += 10;
-               pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
-               rc = isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
-               mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) (pmeth->output_val.svalue.len_used - 5), DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-            }
-            else {
-               pmeth->output_val.svalue.len_used = 10;
-               pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
-               rc = isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
-               pmeth->output_val.svalue.len_used += 5;
-               pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
-               rc = isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
-               mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) (pmeth->output_val.svalue.len_used - 5), DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-            }
-         }
-         else {
-            isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
-         }
-      }
-   }
-
-   return rc;
-}
-
-
 DBX_EXTFUN(int) dbx_previous(unsigned char *input, unsigned char *output)
 {
    return dbx_previous_x(mg_unpack_header(input, output));
@@ -1002,6 +1029,7 @@ DBX_EXTFUN(int) dbx_previous_x(DBXMETH *pmeth)
    pmeth->increment = 0;
    pmeth->merge = 0;
    pmeth->lock = 0;
+   pmeth->direction = -1;
    rc = mg_global_reference(pmeth);
    if (rc != CACHE_SUCCESS) {
       mg_error_message(pmeth, rc);
@@ -1010,15 +1038,15 @@ DBX_EXTFUN(int) dbx_previous_x(DBXMETH *pmeth)
 
    if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
       if (pcon->tlevel > 0) {
-         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_previous_ex;
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_ex;
          rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
       }
       else {
-         rc = dbx_previous_ex(pmeth);
+         rc = dbx_next_ex(pmeth);
       }
    }
    else {
-      rc = dbx_previous_ex(pmeth);
+      rc = dbx_next_ex(pmeth);
    }
 
    if (rc != CACHE_SUCCESS) {
@@ -1065,6 +1093,7 @@ DBX_EXTFUN(int) dbx_previous_data_x(DBXMETH *pmeth)
    pmeth->increment = 0;
    pmeth->merge = 0;
    pmeth->lock = 0;
+   pmeth->direction = -1;
    rc = mg_global_reference(pmeth);
    if (rc != CACHE_SUCCESS) {
       mg_error_message(pmeth, rc);
@@ -1073,15 +1102,15 @@ DBX_EXTFUN(int) dbx_previous_data_x(DBXMETH *pmeth)
 
    if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
       if (pcon->tlevel > 0) {
-         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_previous_ex;
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_ex;
          rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
       }
       else {
-         rc = dbx_previous_ex(pmeth);
+         rc = dbx_next_ex(pmeth);
       }
    }
    else {
-      rc = dbx_previous_ex(pmeth);
+      rc = dbx_next_ex(pmeth);
    }
 
    if (rc != CACHE_SUCCESS) {
@@ -1098,7 +1127,7 @@ dbx_previous_data_exit:
 }
 
 
-DBX_EXTFUN(int) dbx_previous_ex(DBXMETH *pmeth)
+DBX_EXTFUN(int) dbx_next_ex(DBXMETH *pmeth)
 {
    int rc;
    DBXCON *pcon = pmeth->pcon;
@@ -1107,48 +1136,57 @@ DBX_EXTFUN(int) dbx_previous_ex(DBXMETH *pmeth)
       if (pmeth->getdata) {
          DBXSTR str;
 
-         pmeth->output_val.svalue.len_used = 10;
+         pmeth->output_val.svalue.len_used = 0;
          pmeth->output_val.offset = 5;
 
-         str.buf_addr = (pmeth->output_val.svalue.buf_addr + pmeth->output_val.svalue.len_used);
-         str.len_alloc = pmeth->output_val.svalue.len_alloc;
+         str.buf_addr = pmeth->data_val.svalue.buf_addr;
+         str.len_alloc = pmeth->data_val.svalue.len_alloc;
          str.len_used = 0;
 
-         rc = pcon->p_ydb_so->p_ydb_subscript_previous_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &str);
+         if (pmeth->direction == 1)
+            rc = pcon->p_ydb_so->p_ydb_subscript_next_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &str);
+         else
+            rc = pcon->p_ydb_so->p_ydb_subscript_previous_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &str);
 
-         mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) str.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-         pmeth->output_val.svalue.len_used += str.len_used;
-         pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
          if (rc == CACHE_SUCCESS && str.len_used > 0) {
-            str.buf_addr = (pmeth->output_val.svalue.buf_addr + (pmeth->output_val.svalue.len_used + 5));
-            str.len_alloc = pmeth->output_val.svalue.len_alloc;
-            str.len_used = 0;
-            rc = pcon->p_ydb_so->p_ydb_get_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &str);
+
+            pmeth->yargs[pmeth->argc - 2].buf_addr = str.buf_addr;
+            pmeth->yargs[pmeth->argc - 2].len_used = str.len_used;
+            pmeth->yargs[pmeth->argc - 2].len_alloc = str.len_alloc;
+
+            pmeth->output_val.svalue.buf_addr += 10;
+            rc = pcon->p_ydb_so->p_ydb_get_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &(pmeth->output_val.svalue));
+            pmeth->output_val.svalue.buf_addr -= 10;
+
+            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) pmeth->output_val.svalue.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+            pmeth->output_val.svalue.len_used += 10;
+            pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
             mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) str.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+            pmeth->output_val.offset += 5;
+            memcpy((void *) (pmeth->output_val.svalue.buf_addr + pmeth->output_val.offset), (void *) str.buf_addr, (size_t) str.len_used);
             pmeth->output_val.svalue.len_used += (str.len_used + 5);
+            mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) (pmeth->output_val.svalue.len_used - 5), DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
          }
-         else {
-            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
-            pmeth->output_val.svalue.len_used += 5;
-         }
-         mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) (pmeth->output_val.svalue.len_used - 5), DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
       }
       else {
          pmeth->output_val.svalue.len_used = 0;
          pmeth->output_val.svalue.buf_addr += 5;
 
-         rc = pcon->p_ydb_so->p_ydb_subscript_previous_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &(pmeth->output_val.svalue));
+         if (pmeth->direction == 1)
+            rc = pcon->p_ydb_so->p_ydb_subscript_next_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &(pmeth->output_val.svalue));
+         else
+            rc = pcon->p_ydb_so->p_ydb_subscript_previous_s(&(pmeth->args[0].svalue), pmeth->argc - 1, &pmeth->yargs[0], &(pmeth->output_val.svalue));
 
          pmeth->output_val.svalue.buf_addr -= 5;
          mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) pmeth->output_val.svalue.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
       }
    }
    else {
-      rc = pcon->p_isc_so->p_CacheGlobalOrder(pmeth->argc - 1, -1, pmeth->getdata);
+      rc = pcon->p_isc_so->p_CacheGlobalOrder(pmeth->argc - 1, pmeth->direction, pmeth->getdata);
       if (rc == CACHE_SUCCESS) {
         if (pmeth->getdata) { /* v1.3.13 */
             rc = isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
-            if (pmeth->output_val.svalue.len_used == 6 && pmeth->output_val.svalue.buf_addr[5] == '0') {
+            if (pmeth->output_val.svalue.len_used == 6 && pmeth->output_val.svalue.buf_addr[5] == '0') { /* no data */
                pmeth->output_val.svalue.len_used = 5;
                pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
                mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
@@ -1172,6 +1210,373 @@ DBX_EXTFUN(int) dbx_previous_ex(DBXMETH *pmeth)
          }
       }
    }
+
+   return rc;
+}
+
+
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_next_node(unsigned char *input, unsigned char *output)
+{
+   return dbx_next_node_x(mg_unpack_header(input, output));
+}
+
+
+DBX_EXTFUN(int) dbx_next_node_x(DBXMETH *pmeth)
+{
+   int rc;
+   DBXCON *pcon;
+
+   pcon = pmeth->pcon;
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
+      return 1;
+   }
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pmeth->command, "NO");
+      rc = netx_tcp_command(pmeth, 0);
+      goto dbx_next_node_exit;
+   }
+
+   pmeth->getdata = 0;
+   pmeth->increment = 0;
+   pmeth->merge = 0;
+   pmeth->lock = 0;
+   pmeth->direction = 1;
+   rc = mg_global_reference(pmeth);
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+      goto dbx_next_node_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      if (pcon->tlevel > 0) {
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_node_ex;
+         rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
+      }
+      else {
+         rc = dbx_next_node_ex(pmeth);
+      }
+   }
+   else {
+      rc = dbx_next_node_ex(pmeth);
+   }
+
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+   }
+
+dbx_next_node_exit:
+
+   DBX_UNLOCK(rc);
+
+   mg_cleanup(pmeth);
+
+   return 0;
+}
+
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_next_node_data(unsigned char *input, unsigned char *output)
+{
+   return dbx_next_node_data_x(mg_unpack_header(input, output));
+}
+
+
+DBX_EXTFUN(int) dbx_next_node_data_x(DBXMETH *pmeth)
+{
+   int rc;
+   DBXCON *pcon;
+
+   pcon = pmeth->pcon;
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
+      return 1;
+   }
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pmeth->command, "NO");
+      rc = netx_tcp_command(pmeth, 0);
+      goto dbx_next_node_data_exit;
+   }
+
+   pmeth->getdata = 1;
+   pmeth->increment = 0;
+   pmeth->merge = 0;
+   pmeth->lock = 0;
+   pmeth->direction = 1;
+   rc = mg_global_reference(pmeth);
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+      goto dbx_next_node_data_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      if (pcon->tlevel > 0) {
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_node_ex;
+         rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
+      }
+      else {
+         rc = dbx_next_node_ex(pmeth);
+      }
+   }
+   else {
+      rc = dbx_next_node_ex(pmeth);
+   }
+
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+   }
+
+dbx_next_node_data_exit:
+
+   DBX_UNLOCK(rc);
+
+   mg_cleanup(pmeth);
+
+   return 0;
+}
+
+
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_previous_node(unsigned char *input, unsigned char *output)
+{
+   return dbx_previous_node_x(mg_unpack_header(input, output));
+}
+
+
+DBX_EXTFUN(int) dbx_previous_node_x(DBXMETH *pmeth)
+{
+   int rc;
+   DBXCON *pcon;
+
+   pcon = pmeth->pcon;
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
+      return 1;
+   }
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pmeth->command, "NO");
+      rc = netx_tcp_command(pmeth, 0);
+      goto dbx_previous_node_exit;
+   }
+
+   pmeth->getdata = 0;
+   pmeth->increment = 0;
+   pmeth->merge = 0;
+   pmeth->lock = 0;
+   pmeth->direction = -1;
+   rc = mg_global_reference(pmeth);
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+      goto dbx_previous_node_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      if (pcon->tlevel > 0) {
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_node_ex;
+         rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
+      }
+      else {
+         rc = dbx_next_node_ex(pmeth);
+      }
+   }
+   else {
+      rc = dbx_next_node_ex(pmeth);
+   }
+
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+   }
+
+dbx_previous_node_exit:
+
+   DBX_UNLOCK(rc);
+
+   mg_cleanup(pmeth);
+
+   return 0;
+}
+
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_previous_node_data(unsigned char *input, unsigned char *output)
+{
+   return dbx_previous_node_data_x(mg_unpack_header(input, output));
+}
+
+
+DBX_EXTFUN(int) dbx_previous_node_data_x(DBXMETH *pmeth)
+{
+   int rc;
+   DBXCON *pcon;
+
+   pcon = pmeth->pcon;
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
+      return 1;
+   }
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pmeth->command, "NO");
+      rc = netx_tcp_command(pmeth, 0);
+      goto dbx_previous_node_data_exit;
+   }
+
+   pmeth->getdata = 1;
+   pmeth->increment = 0;
+   pmeth->merge = 0;
+   pmeth->lock = 0;
+   pmeth->direction = -1;
+   rc = mg_global_reference(pmeth);
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+      goto dbx_previous_node_data_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      if (pcon->tlevel > 0) {
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_node_ex;
+         rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
+      }
+      else {
+         rc = dbx_next_node_ex(pmeth);
+      }
+   }
+   else {
+      rc = dbx_next_node_ex(pmeth);
+   }
+
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+   }
+
+dbx_previous_node_data_exit:
+
+   DBX_UNLOCK(rc);
+
+   mg_cleanup(pmeth);
+
+   return 0;
+}
+
+
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_next_node_ex(DBXMETH *pmeth)
+{
+   int rc, eod, n, reflen;
+   DBXCON *pcon = pmeth->pcon;
+
+   pmeth->output_val.svalue.len_used = 10;
+   pmeth->output_val.offset = 5;
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      pmeth->keyn = pmeth->argc - 1;
+      pmeth->keyn_next = DBX_MAXARGS;
+      if (pmeth->direction == 1) {
+         rc = pcon->p_ydb_so->p_ydb_node_next_s(&(pmeth->args[0].svalue), pmeth->keyn, &pmeth->yargs[0], &(pmeth->keyn_next), &pmeth->yargs_next[0]);
+      }
+      else {
+         rc = pcon->p_ydb_so->p_ydb_node_previous_s(&(pmeth->args[0].svalue), pmeth->keyn, &pmeth->yargs[0], &(pmeth->keyn_next), &pmeth->yargs_next[0]);
+      }
+      if (rc == YDB_OK && pmeth->keyn_next != YDB_NODE_END) {
+         if (pmeth->getdata) {
+            pmeth->output_val.svalue.buf_addr += 10;
+            rc = pcon->p_ydb_so->p_ydb_get_s(&(pmeth->args[0].svalue), pmeth->keyn_next, &pmeth->yargs_next[0], &(pmeth->output_val.svalue));
+            pmeth->output_val.svalue.buf_addr -= 10;
+            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) pmeth->output_val.svalue.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+            pmeth->output_val.offset += (pmeth->output_val.svalue.len_used + 5);
+            pmeth->output_val.svalue.len_used = pmeth->output_val.offset;
+         }
+         else {
+            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+            pmeth->output_val.offset += 5;
+            pmeth->output_val.svalue.len_used = pmeth->output_val.offset;
+         }
+
+         for (n = 0; n < pmeth->keyn_next; n ++) {
+            mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) pmeth->yargs_next[n].len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+            pmeth->output_val.offset += 5;
+
+            memcpy((void *) (pmeth->output_val.svalue.buf_addr + pmeth->output_val.offset), (void *) pmeth->yargs_next[n].buf_addr, (size_t) pmeth->yargs_next[n].len_used);
+            pmeth->output_val.offset += pmeth->yargs_next[n].len_used;
+            pmeth->output_val.svalue.len_used = pmeth->output_val.offset;
+         }
+      }
+   }
+   else {
+      eod = 0;
+      pmeth->keyn = pmeth->argc - 1;
+
+      rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushGlobalW((int) pmeth->args[0].svalue16.len_used, (unsigned short *) pmeth->args[0].svalue16.buf_addr) : pcon->p_isc_so->p_CachePushGlobal((int) pmeth->args[0].svalue.len_used, (Callin_char_t *) pmeth->args[0].svalue.buf_addr);
+      for (n = 1; n <= pmeth->keyn; n ++) {
+         rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushStrW(pmeth->args[n].svalue16.len_used, (unsigned short *) pmeth->args[n].svalue16.buf_addr) : pcon->p_isc_so->p_CachePushStr(pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
+      }
+      rc = pcon->p_isc_so->p_CacheGlobalQuery(pmeth->keyn, pmeth->direction, pmeth->getdata);
+      if (rc == CACHE_SUCCESS) {
+         pmeth->data_val.offset = 5;
+         pmeth->data_val.svalue.len_used = 5;
+         pmeth->keyn = 0;
+         if (pmeth->getdata) {
+            rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR);
+            if (pmeth->data_val.svalue.len_used == 1 && pmeth->data_val.svalue.buf_addr[5] == '0') {
+               rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR);
+               rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR);
+               eod = 1;
+            }
+            else {
+               pmeth->output_val.offset = 10;
+               pmeth->output_val.svalue.len_used = 10;
+
+               rc = isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_STR); /* data */
+               pmeth->output_val.offset += pmeth->output_val.svalue.len_used;
+               pmeth->data_val.offset = 5;
+               pmeth->data_val.svalue.len_used = 5;
+               rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR); /* reference */
+               reflen = pmeth->data_val.svalue.len_used - 5;
+               if (reflen < 2) {
+                  pmeth->output_val.offset = 5;
+                  pmeth->output_val.svalue.len_used = 5;
+                  eod = 1;
+               }
+               pmeth->data_val.svalue.len_used += 5;
+               pmeth->data_val.offset = pmeth->data_val.svalue.len_used;
+               rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR); /* dunno */
+               pmeth->output_val.offset = pmeth->output_val.svalue.len_used;
+               mg_parse_global_reference(pmeth, &(pmeth->output_val), (char *) pmeth->data_val.svalue.buf_addr + 5, (int) reflen);
+            }
+         }
+         else {
+            rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR); /* reference */
+            if (pmeth->data_val.svalue.len_used <= 5) {
+               eod = 1;
+            }
+            else {
+               /* no data - empty slot */
+               mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+               pmeth->output_val.offset += 5;
+               mg_parse_global_reference(pmeth, &(pmeth->output_val), (char *) pmeth->data_val.svalue.buf_addr + 5, (int) pmeth->data_val.svalue.len_used - 5);
+            }
+         }
+         rc = isc_pop_value(pcon, &(pmeth->data_val), DBX_DTYPE_STR);
+      }
+   }
+
+   mg_add_block_size(&(pmeth->output_val.svalue), pmeth->output_val.offset, (unsigned long) 0, DBX_DSORT_EOD, DBX_DTYPE_DBXSTR);
+   pmeth->output_val.offset += 5;
+   pmeth->output_val.svalue.len_used = pmeth->output_val.offset;
+   mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) (pmeth->output_val.svalue.len_used - 5), DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
 
    return rc;
 }
@@ -1506,17 +1911,173 @@ dbx_merge_exit:
 
 DBX_EXTFUN(int) dbx_merge_ex(DBXMETH *pmeth)
 {
-   int rc, rc1, narg, ex;
-   unsigned int n, ne, max, len, netbuf_used;
+   int rc, narg;
+   unsigned int n, ne;
+   int ni, argc_from_global, from_global_nkeys, from_global_nkeys0, from_global_nkeys_next, to_global_nkeys0, to_global_nkeys, def;
+   char *p1, *p2, *p3, *from_keys_buf0, *from_keys_buf, *to_keys_buf;
+   char from_global_buffer[256];
+   ydb_buffer_t from_global;
+   ydb_buffer_t from_keys0[DBX_MAXARGS], from_keys[DBX_MAXARGS], to_keys[DBX_MAXARGS];
+/*
+   int rc1, ex;
+   unsigned int len, max, netbuf_used;
    unsigned char *netbuf;
    char *outstr8;
    char buffer[256];
    DBXFUN fun, *pfun;
    CACHE_EXSTR zstr;
+*/
+
    DBXCON *pcon = pmeth->pcon;
+
+   from_keys_buf0 = NULL;
+   from_keys_buf = NULL;
+   to_keys_buf = NULL;
 
    rc = CACHE_FAILURE;
    if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+#if 1
+      /* v1.5.22 */
+      argc_from_global = 0;
+      from_global_nkeys = 0;
+      from_global_nkeys0 = 0;
+      to_global_nkeys0 = 0;
+      from_global.len_alloc = 256;
+      from_global.buf_addr = from_global_buffer;
+
+      from_keys_buf0 = (char *) mg_malloc(CACHE_MAXLOSTSZ + 7, 0);
+      if (!from_keys_buf0)
+         goto dbx_merge_ex_exit;
+      from_keys_buf = (char *) mg_malloc(CACHE_MAXLOSTSZ + 7, 0);
+      if (!from_keys_buf)
+         goto dbx_merge_ex_exit;
+      to_keys_buf = (char *) mg_malloc(CACHE_MAXLOSTSZ + 7, 0);
+      if (!to_keys_buf)
+         goto dbx_merge_ex_exit;
+
+      p1 = from_keys_buf0;
+      p2 = from_keys_buf;
+      p3 = to_keys_buf;
+      for (n = 0; n < DBX_MAXARGS; n ++) {
+         from_keys0[n].buf_addr = p1;
+         from_keys0[n].len_used = 0;
+         from_keys0[n].len_alloc = DBX_MAXKEYSIZE;
+         p1 += DBX_MAXKEYSIZE;
+         from_keys[n].buf_addr = p2;
+         from_keys[n].len_used = 0;
+         from_keys[n].len_alloc = DBX_MAXKEYSIZE;
+         p2 += DBX_MAXKEYSIZE;
+         to_keys[n].buf_addr = p3;
+         to_keys[n].len_used = 0;
+         to_keys[n].len_alloc = DBX_MAXKEYSIZE;
+         p3 += DBX_MAXKEYSIZE;
+      }
+
+      rc = CACHE_SUCCESS;
+      for (n = 0; n < (unsigned int) pmeth->argc; n ++) {
+         if (!argc_from_global) {
+            if (n == 0) {
+               if (pmeth->args[n].svalue.buf_addr[0] != '^') { /* v1.3.17 */
+                  /* Add '^' to the global name.  This will trash the data header but, as this is the API, we don't need it anymore */
+                  pmeth->args[n].svalue.buf_addr --;
+                  pmeth->args[n].svalue.buf_addr[0] = '^';
+                  pmeth->args[n].svalue.len_used ++;
+                  pmeth->args[n].svalue.len_alloc ++;
+               }
+            }
+            if (n > 0) {
+               if (pmeth->args[n].sort == DBX_DSORT_GLOBAL) {
+                  argc_from_global = n;
+                  from_global.buf_addr[0] = '\0';
+                  from_global.len_used = 0;
+                  if (pmeth->args[n].svalue.buf_addr[0] != '^') { /* v1.3.17 */
+                     /* Add '^' to the global name.*/
+                     strcpy(from_global.buf_addr, "^");
+                     from_global.len_used ++;
+                  }
+                  strncpy(from_global.buf_addr + from_global.len_used, pmeth->args[n].svalue.buf_addr, pmeth->args[n].svalue.len_used);
+                  from_global.len_used += pmeth->args[n].svalue.len_used;
+                  from_global.buf_addr[from_global.len_used] = '\0';
+               }
+               else {
+                  /* to keys */
+                  memcpy(to_keys[to_global_nkeys0].buf_addr, (void *) pmeth->args[n].svalue.buf_addr, pmeth->args[n].svalue.len_used);
+                  to_keys[to_global_nkeys0].len_used = pmeth->args[n].svalue.len_used;
+                  to_global_nkeys0 ++;
+               }
+            }
+         }
+         else {
+            /* from keys */
+            memcpy((void *) from_keys0[n - (argc_from_global + 1)].buf_addr, (void *) pmeth->args[n].svalue.buf_addr, (size_t) pmeth->args[n].svalue.len_used);
+            memcpy((void *) from_keys[n - (argc_from_global + 1)].buf_addr, (void *) pmeth->args[n].svalue.buf_addr, (size_t) pmeth->args[n].svalue.len_used);
+            from_keys0[n - (argc_from_global + 1)].len_used = pmeth->args[n].svalue.len_used;
+            from_keys[n - (argc_from_global + 1)].len_used = pmeth->args[n].svalue.len_used;
+            from_global_nkeys0 ++;
+            from_global_nkeys = from_global_nkeys0;
+         }
+      }
+
+      rc = pcon->p_ydb_so->p_ydb_data_s(&from_global, from_global_nkeys, &from_keys[0], (unsigned int *) &n);
+      if (rc == YDB_OK && n) {
+         def = n % 10;
+         if (def) {
+            rc = pcon->p_ydb_so->p_ydb_get_s(&from_global, from_global_nkeys, &from_keys[0], &(pmeth->output_val.svalue));
+            rc = pcon->p_ydb_so->p_ydb_set_s(&(pmeth->args[0].svalue), to_global_nkeys0, &to_keys[0], &(pmeth->output_val.svalue));
+         }
+         while (1) {
+            from_global_nkeys_next = DBX_MAXARGS;
+            rc = pcon->p_ydb_so->p_ydb_node_next_s(&(from_global), from_global_nkeys, &from_keys[0], &from_global_nkeys_next, &pmeth->yargs_next[0]);
+
+            if (rc == YDB_OK) {
+               if (from_global_nkeys_next < from_global_nkeys0) {
+                  break;
+               }
+               def = 1;
+               /* compare new keys with base to see if we've traversed past the required keys */
+               for (ni = 0; ni < from_global_nkeys0; ni ++) {
+                  if (pmeth->yargs_next[ni].len_used == from_keys0[ni].len_used) {
+                     if (memcmp(pmeth->yargs_next[ni].buf_addr, from_keys0[ni].buf_addr, from_keys0[ni].len_used)) {
+
+                        def = 0;
+                        break;
+                     }
+                  }
+                  else {
+                     def = 0;
+                     break;
+                  }
+               }
+               if (def) {
+                  to_global_nkeys = to_global_nkeys0;
+                  for (ni = from_global_nkeys0; ni < from_global_nkeys_next; ni ++) {
+                     memcpy((void *) to_keys[to_global_nkeys].buf_addr, (void *) pmeth->yargs_next[ni].buf_addr, pmeth->yargs_next[ni].len_used);
+                     to_keys[to_global_nkeys].len_used = pmeth->yargs_next[ni].len_used;
+                     to_global_nkeys ++;
+                  }
+
+                  rc = pcon->p_ydb_so->p_ydb_get_s(&from_global, from_global_nkeys_next, &pmeth->yargs_next[0], &(pmeth->output_val.svalue));
+                  rc = pcon->p_ydb_so->p_ydb_set_s(&(pmeth->args[0].svalue), to_global_nkeys, &to_keys[0], &(pmeth->output_val.svalue));
+
+                  for (ni = 0; ni < from_global_nkeys_next; ni ++) {
+                     memcpy((void *) from_keys[ni].buf_addr, (void *) pmeth->yargs_next[ni].buf_addr, pmeth->yargs_next[ni].len_used);
+                     from_keys[ni].len_used = pmeth->yargs_next[ni].len_used;
+                  }
+                  from_global_nkeys = from_global_nkeys_next;
+               }
+               else {
+                  break;
+               }
+            }
+            else {
+               break;
+            }
+         }
+      }
+      rc = YDB_OK;
+
+#else
+
       pfun = &fun;
 
       netbuf = (unsigned char *) pmeth->input_str.buf_addr;
@@ -1622,6 +2183,7 @@ DBX_EXTFUN(int) dbx_merge_ex(DBXMETH *pmeth)
             goto dbx_merge_ex_exit;
          }
       }
+#endif
       goto dbx_merge_ex_exit;
    }
 
@@ -1684,9 +2246,16 @@ DBX_EXTFUN(int) dbx_merge_ex(DBXMETH *pmeth)
    rc = pcon->p_isc_so->p_CacheAddGlobalDescriptor(narg);
    rc = pcon->p_isc_so->p_CacheMerge();
 
-   mg_create_string(pmeth, (void *) &rc, DBX_DTYPE_INT);
-
 dbx_merge_ex_exit:
+
+   if (from_keys_buf0)
+      mg_free((void *) from_keys_buf0, 0);
+   if (from_keys_buf)
+      mg_free((void *) from_keys_buf, 0);
+   if (to_keys_buf)
+      mg_free((void *) to_keys_buf, 0);
+
+   mg_create_string(pmeth, (void *) &rc, DBX_DTYPE_INT);
 
    return rc;
 
@@ -1898,6 +2467,275 @@ DBX_EXTFUN(int) dbx_unlock_ex(DBXMETH *pmeth)
    return rc;
 }
 
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_next_gname(unsigned char *input, unsigned char *output)
+{
+   return dbx_next_gname_x(mg_unpack_header(input, output));
+}
+
+
+DBX_EXTFUN(int) dbx_next_gname_x(DBXMETH *pmeth)
+{
+   int rc;
+   DBXCON *pcon;
+
+   pcon = pmeth->pcon;
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
+      return 1;
+   }
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pmeth->command, "NO");
+      rc = netx_tcp_command(pmeth, 0);
+      goto dbx_next_gname_exit;
+   }
+
+   pmeth->getdata = 0;
+   pmeth->increment = 0;
+   pmeth->merge = 0;
+   pmeth->lock = 0;
+   pmeth->direction = 1;
+   rc = mg_unpack_arguments(pmeth);
+   if (rc < 2) {
+      mg_error_message(pmeth, rc);
+      goto dbx_next_gname_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      if (pcon->tlevel > 0) {
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_gname_ex;
+         rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
+      }
+      else {
+         rc = dbx_next_gname_ex(pmeth);
+      }
+   }
+   else {
+      rc = dbx_next_gname_ex(pmeth);
+   }
+
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+   }
+
+dbx_next_gname_exit:
+
+   DBX_UNLOCK(rc);
+
+   mg_cleanup(pmeth);
+
+   return 0;
+}
+
+/* v1.4.18 */
+DBX_EXTFUN(int) dbx_previous_gname(unsigned char *input, unsigned char *output)
+{
+   return dbx_previous_gname_x(mg_unpack_header(input, output));
+}
+
+
+DBX_EXTFUN(int) dbx_previous_gname_x(DBXMETH *pmeth)
+{
+   int rc;
+   DBXCON *pcon;
+
+   pcon = pmeth->pcon;
+
+   if (!pcon || !pcon->connected) {
+      mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
+      return 1;
+   }
+
+   DBX_LOCK(rc, 0);
+
+   if (pcon->connected == 2) {
+      strcpy(pmeth->command, "NO");
+      rc = netx_tcp_command(pmeth, 0);
+      goto dbx_previous_gname_exit;
+   }
+
+   pmeth->getdata = 0;
+   pmeth->increment = 0;
+   pmeth->merge = 0;
+   pmeth->lock = 0;
+   pmeth->direction = -1;
+   rc = mg_unpack_arguments(pmeth);
+   if (rc < 2) {
+      mg_error_message(pmeth, rc);
+      goto dbx_previous_gname_exit;
+   }
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+      if (pcon->tlevel > 0) {
+         pmeth->p_dbxfun = (int (*) (struct tagDBXMETH * pmeth)) dbx_next_gname_ex;
+         rc = ydb_transaction_task(pmeth, YDB_TPCTX_DB);
+      }
+      else {
+         rc = dbx_next_gname_ex(pmeth);
+      }
+   }
+   else {
+      rc = dbx_next_gname_ex(pmeth);
+   }
+
+   if (rc != CACHE_SUCCESS) {
+      mg_error_message(pmeth, rc);
+   }
+
+dbx_previous_gname_exit:
+
+   DBX_UNLOCK(rc);
+
+   mg_cleanup(pmeth);
+
+   return 0;
+}
+
+DBX_EXTFUN(int) dbx_next_gname_ex(DBXMETH *pmeth)
+{
+   int rc, eod, len, tmpglolen;
+   char tmpglo[32], gname_buffer[32], data_buffer[1024];
+   ydb_buffer_t gname, data;
+   DBXCON *pcon = pmeth->pcon;
+
+#ifdef _WIN32
+__try {
+#endif
+   eod = 0;
+
+   if (pcon->dbtype == DBX_DBTYPE_YOTTADB) {
+
+      if (pmeth->args[0].svalue.len_used < 2 || pmeth->args[0].svalue.buf_addr[0] != '^') {
+         if (pmeth->direction == 1) {
+            strcpy(pmeth->args[0].svalue.buf_addr, "^%");
+            pmeth->args[0].svalue.len_used = 2;
+         }
+         else {
+            strcpy(pmeth->args[0].svalue.buf_addr, "^z");
+            pmeth->args[0].svalue.len_used = 2;
+         }
+      }
+
+      /* v1.4.19 */
+      pmeth->args[0].svalue.buf_addr[pmeth->args[0].svalue.len_used] = '\0';
+      gname.buf_addr = gname_buffer;
+      gname.len_alloc = 32;
+      strcpy(gname.buf_addr, pmeth->args[0].svalue.buf_addr);
+      gname.len_used = pmeth->args[0].svalue.len_used;
+
+      data.buf_addr = data_buffer;
+      data.len_alloc = 1024;
+      data.len_used = 0;
+
+      pmeth->output_val.svalue.len_used = 0;
+      if (pmeth->direction == 1) {
+         rc = pcon->p_ydb_so->p_ydb_subscript_next_s(&gname, 0, NULL, &data);
+      }
+      else {
+         rc = pcon->p_ydb_so->p_ydb_subscript_previous_s(&gname, 0, NULL, &data);
+      }
+
+      if (rc == YDB_OK && data.len_used > 0) {
+         memcpy((void *) (pmeth->output_val.svalue.buf_addr + 5), (void *) data.buf_addr, (size_t) data.len_used);
+         pmeth->output_val.svalue.len_used = data.len_used;
+         mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) pmeth->output_val.svalue.len_used, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+      }
+   }
+   else {
+
+      strcpy(tmpglo, (char *) "mGDBXPPG");
+      /* strcpy(tmpglo, "zzz"); */
+      tmpglolen = (int) strlen(tmpglo);
+
+      if (pmeth->args[1].num.int32 == 0) {
+         rc = pcon->p_isc_so->p_CachePushGlobalX(tmpglolen, (Callin_char_t *) tmpglo, 1, (Callin_char_t *) "^");
+         /* rc = pcon->p_isc_so->p_CachePushGlobal(tmpglolen, (Callin_char_t *) tmpglo); */
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+         rc = pcon->p_isc_so->p_CacheGlobalKill(0, 1);
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+         rc = pcon->p_isc_so->p_CachePushGlobalX(tmpglolen, (Callin_char_t *) tmpglo, 1, (Callin_char_t *) "^");
+         /* rc = pcon->p_isc_so->p_CachePushGlobal(tmpglolen, (Callin_char_t *) tmpglo); */
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+         rc = pcon->p_isc_so->p_CacheAddGlobalDescriptor(0);
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+         rc = pcon->p_isc_so->p_CacheAddSSVN(8, (Callin_char_t *) "^$GLOBAL");
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+         rc = pcon->p_isc_so->p_CacheAddSSVNDescriptor(0);
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+         rc = pcon->p_isc_so->p_CacheMerge();
+         if (rc != CACHE_SUCCESS) {
+            eod = 1;
+            return eod;
+         }
+      }
+
+      rc = pcon->p_isc_so->p_CachePushGlobalX(tmpglolen, (Callin_char_t *) tmpglo, 1, (Callin_char_t *) "^");
+      if (rc != CACHE_SUCCESS) {
+         eod = 1;
+         return eod;
+      }
+
+      rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushStrW((int) pmeth->args[0].svalue16.len_used, (unsigned short *) pmeth->args[0].svalue16.buf_addr) : pcon->p_isc_so->p_CachePushStr((int) pmeth->args[0].svalue.len_used, (Callin_char_t *) pmeth->args[0].svalue.buf_addr);
+      if (rc != CACHE_SUCCESS) {
+         eod = 1;
+         return eod;
+      }
+
+      rc = pcon->p_isc_so->p_CacheGlobalOrder(1, pmeth->direction, 0);
+
+      if (rc == CACHE_SUCCESS) {
+         len = 0;
+         isc_pop_value(pcon, &(pmeth->output_val), DBX_DTYPE_DBXSTR);
+      }
+      else {
+         eod = 1;
+      }
+   }
+
+   return 0;
+
+#ifdef _WIN32
+}
+__except (EXCEPTION_EXECUTE_HANDLER) {
+
+   DWORD code;
+   char bufferx[256];
+
+   __try {
+      code = GetExceptionCode();
+      sprintf_s(bufferx, 255, "Exception caught in f:dbx_next_gname_ex: %x", code);
+      mg_log_event(pmeth->pcon->p_log, bufferx, "Error Condition", 0);
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      ;
+   }
+
+   return 0;
+}
+#endif
+}
 
 /* v1.2.8 */
 DBX_EXTFUN(int) dbx_tstart(unsigned char *input, unsigned char *output)
@@ -2194,17 +3032,19 @@ DBX_EXTFUN(int) dbx_function(unsigned char *input, unsigned char *output)
 
 DBX_EXTFUN(int) dbx_function_x(DBXMETH *pmeth)
 {
-   int rc;
+   int rc, utf16;
    DBXFUN fun;
    DBXCON *pcon;
 
    pcon = pmeth->pcon;
+   utf16 = 0;
 
    if (!pcon || !pcon->connected) {
       mg_set_error_message_ex((unsigned char *) pmeth->output_val.svalue.buf_addr, "No Database Connection");
       return 1;
    }
 
+   utf16 = pcon->utf16;
    fun.rflag = 0;
 
    DBX_LOCK(rc, 0);
@@ -2240,6 +3080,8 @@ DBX_EXTFUN(int) dbx_function_x(DBXMETH *pmeth)
    }
 
 dbx_function_exit:
+
+   pcon->utf16 = utf16; /* v1.5.20 */
 
    DBX_UNLOCK(rc);
 
@@ -2684,6 +3526,87 @@ dbx_setnamespace_exit:
 }
 
 
+DBX_EXTFUN(int) dbx_timeout(unsigned char *input, unsigned char *output)
+{
+   int n, timeout;
+   DBXMETH *pmeth;
+   DBXCON *pcon;
+
+   pmeth = mg_unpack_header(input, output);
+   mg_unpack_arguments(pmeth);
+   pcon = pmeth->pcon;
+
+   timeout = pmeth->args[0].num.int32;
+   if (pcon && timeout > 3) {
+      pcon->timeout = timeout;
+   }
+
+   sprintf((char *) pmeth->output_val.svalue.buf_addr + pmeth->output_val.offset, "%d", pcon->timeout);
+   n = (int) strlen((char *) pmeth->output_val.svalue.buf_addr + pmeth->output_val.offset);
+   pmeth->output_val.svalue.len_used += n;
+   mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) n, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+
+   return 0;
+}
+
+/* v1.5.20 */
+DBX_EXTFUN(int) dbx_charset(unsigned char *input, unsigned char *output)
+{
+   int len;
+   DBXMETH *pmeth;
+   DBXCON *pcon;
+
+   pmeth = mg_unpack_header(input, output);
+   mg_unpack_arguments(pmeth);
+   pcon = pmeth->pcon;
+
+   if (pcon && pmeth->argc > 0) {
+      len = (pmeth->args[0].svalue.len_used < 16) ? pmeth->args[0].svalue.len_used : 16;
+      strncpy(pcon->charset, pmeth->args[0].svalue.buf_addr, len);
+      pcon->charset[len] = '\0';
+      mg_lcase(pcon->charset);
+      if (strcmp(pcon->charset, "utf-8") && strcmp(pcon->charset, "utf-16") && strcmp(pcon->charset, "ascii")) {
+         strcpy(pcon->charset, "utf-8");
+      }
+      pcon->utf16 = 0;
+      if (!strcmp(pcon->charset, "utf-16")) {
+         pcon->utf16 = 1;
+      }
+   }
+
+   strcpy((char *) pmeth->output_val.svalue.buf_addr + pmeth->output_val.offset, pcon->charset);
+   len = (int) strlen((char *) pmeth->output_val.svalue.buf_addr + pmeth->output_val.offset);
+   pmeth->output_val.svalue.len_used += len;
+   mg_add_block_size(&(pmeth->output_val.svalue), 0, (unsigned long) len, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+
+   return 0;
+}
+
+
+DBX_EXTFUN(int) dbx_loglevel(unsigned char *input, unsigned char *output)
+{
+   DBXMETH *pmeth;
+   DBXCON *pcon;
+
+   pmeth = mg_unpack_header(input, output);
+   pcon = pmeth->pcon;
+
+   return 0;
+}
+
+
+DBX_EXTFUN(int) dbx_logmessage(unsigned char *input, unsigned char *output)
+{
+   DBXMETH *pmeth;
+   DBXCON *pcon;
+
+   pmeth = mg_unpack_header(input, output);
+   pcon = pmeth->pcon;
+
+   return 0;
+}
+
+
 DBX_EXTFUN(int) dbx_sleep(int period_ms)
 {
    unsigned long msecs;
@@ -3027,6 +3950,12 @@ int isc_load_library(DBXCON *pcon)
       sprintf(pcon->error, "Error loading %s library: %s; Cannot locate the following function : %s", pcon->p_isc_so->dbname, pcon->p_isc_so->libnam, fun);
       goto isc_load_library_exit;
    }
+   sprintf(fun, "%sPushGlobalW", pcon->p_isc_so->funprfx); /* v1.4.18 */
+   pcon->p_isc_so->p_CachePushGlobalW = (int (*) (int nlen, const unsigned short * nptr)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   if (!pcon->p_isc_so->p_CachePushGlobalW) {
+      sprintf(pcon->error, "Error loading %s library: %s; Cannot locate the following function : %s", pcon->p_isc_so->dbname, pcon->p_isc_so->libnam, fun);
+      goto isc_load_library_exit;
+   }
    sprintf(fun, "%sPushGlobalX", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CachePushGlobalX = (int (*) (int, const Callin_char_t *, int, const Callin_char_t *)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    if (!pcon->p_isc_so->p_CachePushGlobalX) {
@@ -3105,9 +4034,17 @@ int isc_load_library(DBXCON *pcon)
       sprintf(pcon->error, "Error loading %s library: %s; Cannot locate the following function : %s", pcon->p_isc_so->dbname, pcon->p_isc_so->libnam, fun);
       goto isc_load_library_exit;
    }
+   sprintf(fun, "%sPushLockW", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CachePushLockW = (int (*) (int, const unsigned short *)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   if (!pcon->p_isc_so->p_CachePushLockW) {
+      sprintf(pcon->error, "Error loading %s library: %s; Cannot locate the following function : %s", pcon->p_isc_so->dbname, pcon->p_isc_so->libnam, fun);
+      goto isc_load_library_exit;
+   }
 
    sprintf(fun, "%sAddGlobal", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheAddGlobal = (int (*) (int, const Callin_char_t *)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sAddGlobalW", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CacheAddGlobalW = (int (*) (int, const unsigned short *)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sAddGlobalDescriptor", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheAddGlobalDescriptor = (int (*) (int)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sAddSSVN", pcon->p_isc_so->funprfx);
@@ -3125,6 +4062,8 @@ int isc_load_library(DBXCON *pcon)
 
    sprintf(fun, "%sPushFunc", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CachePushFunc = (int (*) (unsigned int *, int, const Callin_char_t *, int, const Callin_char_t *)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sPushFuncW", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CachePushFuncW = (int (*) (unsigned int *, int, const unsigned short *, int, const unsigned short *)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sExtFun", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheExtFun = (int (*) (unsigned int, int)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sPushRtn", pcon->p_isc_so->funprfx);
@@ -3147,10 +4086,14 @@ int isc_load_library(DBXCON *pcon)
    pcon->p_isc_so->p_CacheInvokeMethod = (int (*) (int narg)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sPushMethod", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CachePushMethod = (int (*) (unsigned int oref, int mlen, const Callin_char_t * mptr, int flg)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sPushMethodW", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CachePushMethodW = (int (*) (unsigned int oref, int mlen, const unsigned short * mptr, int flg)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sInvokeClassMethod", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheInvokeClassMethod = (int (*) (int narg)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sPushClassMethod", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CachePushClassMethod = (int (*) (int clen, const Callin_char_t * cptr, int mlen, const Callin_char_t * mptr, int flg)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sPushClassMethodW", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CachePushClassMethodW = (int (*) (int clen, const unsigned short * cptr, int mlen, const unsigned short * mptr, int flg)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
 
    sprintf(fun, "%sGetProperty", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheGetProperty = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
@@ -3158,6 +4101,8 @@ int isc_load_library(DBXCON *pcon)
    pcon->p_isc_so->p_CacheSetProperty = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
    sprintf(fun, "%sPushProperty", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CachePushProperty = (int (*) (unsigned int oref, int plen, const Callin_char_t * pptr)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
+   sprintf(fun, "%sPushPropertyW", pcon->p_isc_so->funprfx);
+   pcon->p_isc_so->p_CachePushPropertyW = (int (*) (unsigned int oref, int plen, const unsigned short * pptr)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
 
    sprintf(fun, "%sType", pcon->p_isc_so->funprfx);
    pcon->p_isc_so->p_CacheType = (int (*) (void)) mg_dso_sym(pcon->p_isc_so->p_library, (char *) fun);
@@ -3334,7 +4279,6 @@ isc_authenticate_reopen:
             reopen = 1;
          if (rc == CACHE_SUCCESS) {
             isc_parse_zv((char *) retval.str, pcon->p_zv);
-            sprintf(pcon->p_zv->version, "%d.%d.b%d", pcon->p_zv->majorversion, pcon->p_zv->minorversion, pcon->p_zv->mg_build);
          }
       }
    }
@@ -3466,6 +4410,8 @@ int isc_parse_zv(char *zv, DBXZV * p_isc_sv)
       else
          p_isc_sv->vnumber = ((p_isc_sv->majorversion * 100000) + (p_isc_sv->minorversion * 10000) + p_isc_sv->mg_build);
 
+      sprintf(p_isc_sv->version, "%d.%d.b%d", p_isc_sv->majorversion, p_isc_sv->minorversion, p_isc_sv->mg_build);
+
       result = 1;
    }
 
@@ -3504,13 +4450,17 @@ int isc_pop_value(DBXCON *pcon, DBXVAL *value, int required_type)
    int rc, ex, ctype, offset, oref;
    unsigned int n, max, len;
    char *pstr8, *p8, *outstr8;
+   char wcharerr[4];
+   unsigned short *outstr16;
    CACHE_EXSTR zstr;
 
-   ex = 1;
+   ex = 0; /* v1.5.20 */
    offset = 0;
    zstr.len = 0;
    zstr.str.ch = NULL;
+   zstr.str.wch = NULL;
    outstr8 = NULL;
+   outstr16 = NULL;
    ctype = CACHE_ASTRING;
 
    if (pcon->p_isc_so->p_CacheType) {
@@ -3533,12 +4483,30 @@ int isc_pop_value(DBXCON *pcon, DBXVAL *value, int required_type)
    }
 
    if (ex) {
-      rc = pcon->p_isc_so->p_CachePopExStr(&zstr);
-      len = zstr.len;
-      outstr8 = (char *) zstr.str.ch;
+      if (pcon->utf16) {
+         rc = pcon->p_isc_so->p_CachePopExStrW(&zstr);
+         len = zstr.len;
+         outstr16 = (unsigned short *) zstr.str.wch;
+      }
+      else {
+         rc = pcon->p_isc_so->p_CachePopExStr(&zstr);
+         len = zstr.len;
+         outstr8 = (char *) zstr.str.ch;
+      }
    }
    else {
-      rc = pcon->p_isc_so->p_CachePopStr((int *) &len, (Callin_char_t **) &outstr8);
+      if (pcon->utf16) {
+         rc = pcon->p_isc_so->p_CachePopStrW((int *) &len, (short **) &outstr16);
+      }
+      else {
+         rc = pcon->p_isc_so->p_CachePopStr((int *) &len, (Callin_char_t **) &outstr8);
+      }
+   }
+
+   if (rc == CACHE_ERWIDECHAR) { /* v1.5.20 */
+      outstr8 = wcharerr;
+      strcpy(outstr8, "?");
+      len = 1;
    }
 
    max = 0;
@@ -3571,14 +4539,29 @@ int isc_pop_value(DBXCON *pcon, DBXVAL *value, int required_type)
          len = 0;
       }
    }
-   for (n = 0; n < len; n ++) {
-      if (n > max)
-         break;
-      pstr8[n + offset] = (char) outstr8[n];
+   if (pcon->utf16) { /* v1.5.20 */
+      n = (unsigned int) mg_utf16_to_utf8(pstr8 + offset, value->svalue.len_alloc, outstr16, len);
+      pstr8[n + offset] = '\0';
+      value->svalue.len_used += n;
+/*
+      {
+         int nx;
+         printf("\r\n Unicode response as UTF8; len=%d : ", n);
+         for (nx = 0; nx < n; nx ++) {
+            printf(" %u", (unsigned char) pstr8[nx + offset]);
+         }
+      }
+*/
    }
-   pstr8[n + offset] = '\0';
-
-   value->svalue.len_used += n;
+   else {
+      for (n = 0; n < len; n ++) {
+         if (n > max)
+            break;
+         pstr8[n + offset] = (char) outstr8[n];
+      }
+      pstr8[n + offset] = '\0';
+      value->svalue.len_used += n;
+   }
 
    /* v1.3.13 */
    mg_add_block_size(&(value->svalue), (value->svalue.len_used - (n + 5)), (unsigned long) n, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
@@ -4046,7 +5029,6 @@ int ydb_open(DBXMETH *pmeth)
 
    if (rc == CACHE_SUCCESS) {
       ydb_parse_zv(data.buf_addr, &(pcon->zv));
-      sprintf(pcon->p_zv->version, "%d.%d.b%d", pcon->p_zv->majorversion, pcon->p_zv->minorversion, pcon->p_zv->mg_build);
    }
 
 ydb_open_exit:
@@ -4094,6 +5076,8 @@ int ydb_parse_zv(char *zv, DBXZV * p_ydb_sv)
       }
 
       p_ydb_sv->vnumber = ((p_ydb_sv->majorversion * 100000) + (p_ydb_sv->minorversion * 10000) + p_ydb_sv->mg_build);
+
+      sprintf(p_ydb_sv->version, "%d.%d.b%d", p_ydb_sv->majorversion, p_ydb_sv->minorversion, p_ydb_sv->mg_build);
 
       result = 1;
    }
@@ -4171,9 +5155,43 @@ int ydb_error_message(DBXMETH *pmeth, int error_code)
 
 int ydb_function(DBXMETH *pmeth, DBXFUN *pfun)
 {
-   int rc;
+   int rc, n;
    DBXCON *pcon = pmeth->pcon;
 
+   /* v1.4.19 */
+
+   pmeth->output_val.svalue.len_used = 0;
+   pmeth->output_val.svalue.buf_addr[0] = '\0';
+
+   pfun->out.address = (char *) pmeth->output_val.svalue.buf_addr;
+   pfun->out.length = (unsigned long) pmeth->output_val.svalue.len_alloc;
+   pfun->argc = pmeth->argc;
+
+   for (n = 1; n < pmeth->argc; n ++) {
+      pfun->in[n].address = (char *) pmeth->args[n].svalue.buf_addr;
+      pfun->in[n].length = (unsigned long) pmeth->args[n].svalue.len_used;
+      pfun->in[n].address[pfun->in[n].length] = '\0';
+   }
+
+   rc = ydb_function_ex(pmeth, pfun);
+
+   if (rc == CACHE_SUCCESS) {
+      pmeth->output_val.svalue.len_used = (int) pfun->out.length;
+   }
+   else {
+      pmeth->output_val.svalue.len_used = 0;
+/*
+      {
+         char buffer[2048];
+         ydb_long_t len;
+         len = 2000;
+         pcon->p_ydb_so->p_ydb_zstatus((ydb_char_t *) buffer, (ydb_long_t) len);
+         printf("\r\nerror=%s", buffer);
+      }
+*/
+   }
+
+/*
    pmeth->output_val.svalue.len_used = 0;
    pmeth->output_val.svalue.buf_addr[0] = '\0';
 
@@ -4196,6 +5214,7 @@ int ydb_function(DBXMETH *pmeth, DBXFUN *pfun)
    }
 
    pmeth->output_val.svalue.len_used = (int) strlen(pmeth->output_val.svalue.buf_addr);
+*/
 
    return rc;
 }
@@ -4752,7 +5771,8 @@ int gtm_error_message(DBXMETH *pmeth, int error_code)
 
 DBXMETH * mg_unpack_header(unsigned char *input, unsigned char *output)
 {
-   int len, output_bsize, offset, index;
+   int n, len, output_bsize, offset, index;
+   char *p;
    DBXCON *pcon;
    DBXMETH *pmeth;
 
@@ -4780,6 +5800,7 @@ DBXMETH * mg_unpack_header(unsigned char *input, unsigned char *output)
    pmeth = (DBXMETH *) pcon->pmeth_base;
    pmeth->pcon = pcon;
 
+   pmeth->cmnd = (int) input[4];
    pmeth->argc = 0;
    pmeth->input_str.buf_addr = (char *) input;
    pmeth->input_str.len_used = len;
@@ -4800,28 +5821,86 @@ DBXMETH * mg_unpack_header(unsigned char *input, unsigned char *output)
 
    pmeth->offset = offset;
 
+   if (!pmeth->data_val.svalue.buf_addr) { /* v1.4.18 */
+      pmeth->data_val.svalue.buf_addr = (char *) mg_malloc(CACHE_MAXLOSTSZ + 7, 0);
+      pmeth->data_val.svalue.len_alloc = CACHE_MAXLOSTSZ;
+      pmeth->data_val.offset = 5;
+      pmeth->data_val.svalue.len_used = 5;
+      p = pmeth->data_val.svalue.buf_addr;
+      for (n = 0; n < DBX_MAXARGS; n ++) {
+         pmeth->yargs_next[n].buf_addr = (p + 5);
+         pmeth->yargs_next[n].len_used = 0;
+         pmeth->yargs_next[n].len_alloc = DBX_MAXKEYSIZE; /* v1.5.22 */
+         p += (5 + DBX_MAXKEYSIZE);
+      }
+   }
+
+   if (pcon->utf16) { /* v1.5.20 */
+      if (!pmeth->data_val.svalue16.buf_addr) {
+         pmeth->data_val.svalue16.buf_addr = (unsigned short *) mg_malloc((CACHE_MAXLOSTSZ + 7) * sizeof(unsigned short), 0);
+         pmeth->data_val.svalue16.len_alloc = CACHE_MAXLOSTSZ;
+      }
+      pmeth->data_val.svalue16.len_used = 0;
+      if (!pmeth->input_str16.buf_addr) {
+         pmeth->input_str16.buf_addr = (unsigned short *) mg_malloc((CACHE_MAXLOSTSZ + 7) * sizeof(unsigned short), 0);
+         pmeth->input_str16.len_alloc = CACHE_MAXLOSTSZ;
+      }
+      pmeth->input_str16.len_used = 0;
+      if (!pmeth->output_val.svalue16.buf_addr) {
+         pmeth->output_val.svalue16.buf_addr = (unsigned short *) mg_malloc((CACHE_MAXLOSTSZ + 7) * sizeof(unsigned short), 0);
+         pmeth->output_val.svalue16.len_alloc = CACHE_MAXLOSTSZ;
+      }
+      pmeth->output_val.svalue16.len_used = 0;
+   }
+
    return pmeth;
 }
 
 
 int mg_unpack_arguments(DBXMETH *pmeth)
 {
-   int len, dsort, dtype;
-
+   int len, len16, dsort, dtype;
+   char buffer[32];
    for (;;) {
       len = (int) mg_get_block_size(&(pmeth->input_str), pmeth->offset, &dsort, &dtype);
       pmeth->offset += 5;
 /*
-      printf("\r\nn=%d; len=%d; offset=%d; sort=%d; type=%d; str=%s;", pmeth->argc, len, pmeth->offset, dsort, dtype, pmeth->input_str.str + offset);
+      printf("\r\nn=%d; len=%d; offset=%d; sort=%d; type=%d; str=%s;", pmeth->argc, len, pmeth->offset, dsort, dtype, pmeth->input_str.buf_addr + pmeth->offset);
 */
       if (dsort == DBX_DSORT_EOD) {
          break;
       }
-
       pmeth->args[pmeth->argc].type = dtype;
       pmeth->args[pmeth->argc].realloc = 0;
       pmeth->args[pmeth->argc].svalue.len_used = len;
       pmeth->args[pmeth->argc].svalue.buf_addr = (char *) (pmeth->input_str.buf_addr + pmeth->offset);
+
+      if (pmeth->pcon && pmeth->pcon->utf16) { /* v1.5.20 */
+
+         pmeth->args[pmeth->argc].svalue16.buf_addr = (pmeth->input_str16.buf_addr + pmeth->input_str16.len_used);
+         len16 = (int) mg_utf8_to_utf16((unsigned short *) pmeth->args[pmeth->argc].svalue16.buf_addr, (size_t) pmeth->input_str16.len_alloc, (char *) pmeth->args[pmeth->argc].svalue.buf_addr, (size_t) len);
+         pmeth->args[pmeth->argc].svalue16.len_used = len16;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16] = 0;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16 + 1] = 0;
+         pmeth->input_str16.len_used += (len16 + 2);
+/*
+         {
+            int n;
+            printf("\r\n Unicode argument %d; len=%d : ", pmeth->argc, pmeth->args[pmeth->argc].svalue16.len_used);
+            for (n = 0; n < pmeth->args[pmeth->argc].svalue16.len_used; n ++) {
+               printf(" %u", pmeth->args[pmeth->argc].svalue16.buf_addr[n]);
+            }
+         }
+*/
+
+      }
+
+      if (dtype == DBX_DTYPE_INT) { /* v1.4.18 */
+         strncpy(buffer, pmeth->args[pmeth->argc].svalue.buf_addr, len);
+         buffer[len] = '\0';
+         pmeth->args[pmeth->argc].num.int32 = (int) strtol(buffer, NULL, 10);
+      }
+
       pmeth->offset += len;
       pmeth->argc ++;
 
@@ -4835,7 +5914,7 @@ int mg_unpack_arguments(DBXMETH *pmeth)
 
 int mg_global_reference(DBXMETH *pmeth)
 {
-   int n, rc, len, dsort, dtype, last_arg;
+   int n, rc, len, len16, dsort, dtype, last_arg;
    unsigned int ne;
    DBXCON *pcon = pmeth->pcon;
 
@@ -4859,11 +5938,29 @@ int mg_global_reference(DBXMETH *pmeth)
       pmeth->args[pmeth->argc].svalue.buf_addr = (char *) (pmeth->input_str.buf_addr + pmeth->offset);
       pmeth->offset += len;
 
-      if (dtype == DBX_DTYPE_INT) { /* cmtxxx set integer value */
-         unsigned char chr;
-         char buffer[256];
+      if (pmeth->pcon && pmeth->pcon->utf16) { /* v1.5.20 */
 
-         for (n = 0; n < (len - 1); n ++) { /* cmtxxx advance pointer past leading zeros */
+         pmeth->args[pmeth->argc].svalue16.buf_addr = (pmeth->input_str16.buf_addr + pmeth->input_str16.len_used);
+         len16 = (int) mg_utf8_to_utf16((unsigned short *) pmeth->args[pmeth->argc].svalue16.buf_addr, (size_t) pmeth->input_str16.len_alloc, (char *) pmeth->args[pmeth->argc].svalue.buf_addr, (size_t) len);
+         pmeth->args[pmeth->argc].svalue16.len_used = len16;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16] = 0;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16 + 1] = 0;
+         pmeth->input_str16.len_used += (len16 + 2);
+/*
+         {
+            int n;
+            printf("\r\nmg_global_reference Unicode argument %d; len=%d : ", pmeth->argc, pmeth->args[pmeth->argc].svalue16.len_used);
+            for (n = 0; n < pmeth->args[pmeth->argc].svalue16.len_used; n ++) {
+               printf(" %lu", pmeth->args[pmeth->argc].svalue16.buf_addr[n]);
+            }
+         }
+*/
+      }
+
+      if (dtype == DBX_DTYPE_INT) { /* v1.3.17 set integer value */
+         unsigned char chr;
+
+         for (n = 0; n < (len - 1); n ++) { /* v1.3.17 advance pointer past leading zeros */
             if (*(pmeth->args[pmeth->argc].svalue.buf_addr) != '0') {
                break;
             }
@@ -4873,10 +5970,11 @@ int mg_global_reference(DBXMETH *pmeth)
          chr = pmeth->args[pmeth->argc].svalue.buf_addr[pmeth->args[pmeth->argc].svalue.len_used];
          pmeth->args[pmeth->argc].svalue.buf_addr[pmeth->args[pmeth->argc].svalue.len_used] = '\0';
          pmeth->args[pmeth->argc].num.int32 = (int) strtol(pmeth->args[pmeth->argc].svalue.buf_addr, NULL, 10);
-/*
+
          printf("\r\n len=%d; modified len=%d; int=%d; str=%s", len, pmeth->args[pmeth->argc].svalue.len_used, pmeth->args[pmeth->argc].num.int32, pmeth->args[pmeth->argc].svalue.buf_addr);
-*/
+/*
          pmeth->args[pmeth->argc].svalue.buf_addr[pmeth->args[pmeth->argc].svalue.len_used] = chr;
+*/
       }
 
       /* v1.3.13 */
@@ -4913,13 +6011,21 @@ int mg_global_reference(DBXMETH *pmeth)
 
       if (n == 0) {
          if (pmeth->lock) { /* v1.3.13 */
-            rc = pcon->p_isc_so->p_CachePushLock((int) pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
+            rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushLockW((int) pmeth->args[n].svalue16.len_used, (unsigned short *) pmeth->args[n].svalue16.buf_addr) : pcon->p_isc_so->p_CachePushLock((int) pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
          }
          else {
-            if (pmeth->args[n].svalue.buf_addr[0] == '^')
-               rc = pcon->p_isc_so->p_CachePushGlobal((int) pmeth->args[n].svalue.len_used - 1, (Callin_char_t *) pmeth->args[n].svalue.buf_addr + 1);
-            else
-               rc = pcon->p_isc_so->p_CachePushGlobal((int) pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
+            if (pcon->utf16) { /* v1.5.20 */
+               if (pmeth->args[n].svalue16.buf_addr[0] == 94)
+                  rc = pcon->p_isc_so->p_CachePushGlobalW((int) pmeth->args[n].svalue16.len_used - 1, (unsigned short *) pmeth->args[n].svalue16.buf_addr + 1);
+               else
+                  rc = pcon->p_isc_so->p_CachePushGlobalW((int) pmeth->args[n].svalue16.len_used, (unsigned short *) pmeth->args[n].svalue16.buf_addr);
+            }
+            else {
+               if (pmeth->args[n].svalue.buf_addr[0] == '^')
+                  rc = pcon->p_isc_so->p_CachePushGlobal((int) pmeth->args[n].svalue.len_used - 1, (Callin_char_t *) pmeth->args[n].svalue.buf_addr + 1);
+               else
+                  rc = pcon->p_isc_so->p_CachePushGlobal((int) pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
+            }
          }
       }
       else {
@@ -4946,22 +6052,38 @@ int mg_global_reference(DBXMETH *pmeth)
          else if (pmeth->args[n].type == DBX_DTYPE_DOUBLE) {
             rc = pcon->p_isc_so->p_CachePushDbl(pmeth->args[n].num.real);
          }
-         else {
+         else { /* v1.5.20 */
             if (pmeth->args[n].svalue.len_used < DBX_MAXSIZE) {
-               rc = pcon->p_isc_so->p_CachePushStr(pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
+               rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushStrW(pmeth->args[n].svalue16.len_used, (unsigned short *) pmeth->args[n].svalue16.buf_addr) : pcon->p_isc_so->p_CachePushStr(pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
             }
             else {
-               pmeth->args[n].cvalue.pstr = (void *) pcon->p_isc_so->p_CacheExStrNew((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr), pmeth->args[n].svalue.len_used);
-               if (pmeth->args[n].cvalue.pstr == NULL) { /* v1.3.15 */
-                  rc = CACHE_FAILURE;
-                  break;
-               }
-               for (ne = 0; ne < pmeth->args[n].svalue.len_used; ne ++) {
-                  pmeth->args[n].cvalue.zstr.str.ch[ne] = (char) pmeth->args[n].svalue.buf_addr[ne];
-               }
-               pmeth->args[n].cvalue.zstr.len = pmeth->args[n].svalue.len_used;
+               if (pcon->utf16) {
+                  pmeth->args[n].cvalue.pstr = (void *) pcon->p_isc_so->p_CacheExStrNewW((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr), pmeth->args[n].svalue16.len_used + 1);
+                  if (pmeth->args[n].cvalue.pstr == NULL) {
+                     rc = CACHE_FAILURE;
+                     break;
+                  }
+                  for (ne = 0; ne < pmeth->args[n].svalue16.len_used; ne ++) {
+                     pmeth->args[n].cvalue.zstr.str.wch[ne] = (unsigned short) pmeth->args[n].svalue16.buf_addr[ne];
+                  }
+                  pmeth->args[n].cvalue.zstr.str.wch[ne] = (char) 0;
+                  pmeth->args[n].cvalue.zstr.len = pmeth->args[n].svalue16.len_used;
 
-               rc = pcon->p_isc_so->p_CachePushExStr((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr));
+                  rc = pcon->p_isc_so->p_CachePushExStrW((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr));
+               }
+               else {
+                  pmeth->args[n].cvalue.pstr = (void *) pcon->p_isc_so->p_CacheExStrNew((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr), pmeth->args[n].svalue.len_used);
+                  if (pmeth->args[n].cvalue.pstr == NULL) { /* v1.3.15 */
+                     rc = CACHE_FAILURE;
+                     break;
+                  }
+                  for (ne = 0; ne < pmeth->args[n].svalue.len_used; ne ++) {
+                     pmeth->args[n].cvalue.zstr.str.ch[ne] = (char) pmeth->args[n].svalue.buf_addr[ne];
+                  }
+                  pmeth->args[n].cvalue.zstr.len = pmeth->args[n].svalue.len_used;
+
+                  rc = pcon->p_isc_so->p_CachePushExStr((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr));
+               }
             }
          }
       }
@@ -4976,7 +6098,7 @@ int mg_global_reference(DBXMETH *pmeth)
 
 int mg_class_reference(DBXMETH *pmeth, short context)
 {
-   int n, rc, len, dsort, dtype, flags;
+   int n, rc, len, len16, dsort, dtype, flags;
    unsigned int ne;
    DBXCON *pcon = pmeth->pcon;
 
@@ -4997,6 +6119,26 @@ int mg_class_reference(DBXMETH *pmeth, short context)
       pmeth->args[pmeth->argc].svalue.len_alloc = len;
       pmeth->args[pmeth->argc].svalue.buf_addr = (char *) (pmeth->input_str.buf_addr + pmeth->offset);
       pmeth->offset += len;
+
+      if (pmeth->pcon && pmeth->pcon->utf16) { /* v1.5.20 */
+
+         pmeth->args[pmeth->argc].svalue16.buf_addr = (pmeth->input_str16.buf_addr + pmeth->input_str16.len_used);
+         len16 = (int) mg_utf8_to_utf16((unsigned short *) pmeth->args[pmeth->argc].svalue16.buf_addr, (size_t) pmeth->input_str16.len_alloc, (char *) pmeth->args[pmeth->argc].svalue.buf_addr, (size_t) len);
+         pmeth->args[pmeth->argc].svalue16.len_used = len16;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16] = 0;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16 + 1] = 0;
+         pmeth->input_str16.len_used += (len16 + 2);
+/*
+         {
+            int n;
+            printf("\r\nmg_class_reference Unicode argument %d; len=%d : ", pmeth->argc, pmeth->args[pmeth->argc].svalue16.len_used);
+            for (n = 0; n < pmeth->args[pmeth->argc].svalue16.len_used; n ++) {
+               printf(" %u", pmeth->args[pmeth->argc].svalue16.buf_addr[n]);
+            }
+         }
+*/
+      }
+
       n = pmeth->argc;
       pmeth->argc ++;
       if (pmeth->argc > (DBX_MAXARGS - 1)) {
@@ -5017,7 +6159,8 @@ int mg_class_reference(DBXMETH *pmeth, short context)
          }
          else if (n == 1) {
             flags = 1;
-            rc = pcon->p_isc_so->p_CachePushClassMethod(pmeth->args[0].svalue.len_used, (const Callin_char_t *) pmeth->args[0].svalue.buf_addr, pmeth->args[1].svalue.len_used, (const Callin_char_t *) pmeth->args[1].svalue.buf_addr, flags);
+            rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushClassMethodW((int) pmeth->args[0].svalue16.len_used, (unsigned short *) pmeth->args[0].svalue16.buf_addr, (int) pmeth->args[1].svalue16.len_used, (unsigned short *) pmeth->args[1].svalue16.buf_addr, 1)
+                             : pcon->p_isc_so->p_CachePushClassMethod(pmeth->args[0].svalue.len_used, (const Callin_char_t *) pmeth->args[0].svalue.buf_addr, pmeth->args[1].svalue.len_used, (const Callin_char_t *) pmeth->args[1].svalue.buf_addr, flags);
             continue;
          }
       }
@@ -5027,7 +6170,8 @@ int mg_class_reference(DBXMETH *pmeth, short context)
          }
          else if (n == 1) {
             flags = 1;
-            rc = pcon->p_isc_so->p_CachePushMethod((int) strtol(pmeth->args[0].svalue.buf_addr, NULL, 10), pmeth->args[1].svalue.len_used, (const Callin_char_t *) pmeth->args[1].svalue.buf_addr, flags);
+            rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushMethodW(pmeth->args[0].num.oref, (int) pmeth->args[1].svalue16.len_used, (unsigned short *) pmeth->args[1].svalue16.buf_addr, 1)
+                             : pcon->p_isc_so->p_CachePushMethod((int) strtol(pmeth->args[0].svalue.buf_addr, NULL, 10), pmeth->args[1].svalue.len_used, (const Callin_char_t *) pmeth->args[1].svalue.buf_addr, flags);
             continue;
          }
       }
@@ -5037,7 +6181,8 @@ int mg_class_reference(DBXMETH *pmeth, short context)
          }
          else if (n == 1) {
             flags = 1;
-            rc = pcon->p_isc_so->p_CachePushProperty((int) strtol(pmeth->args[0].svalue.buf_addr, NULL, 10), pmeth->args[1].svalue.len_used, (const Callin_char_t *) pmeth->args[1].svalue.buf_addr);
+            rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushPropertyW(pmeth->args[0].num.oref, (int) pmeth->args[1].svalue16.len_used, (unsigned short *) pmeth->args[1].svalue16.buf_addr)
+                             : pcon->p_isc_so->p_CachePushProperty((int) strtol(pmeth->args[0].svalue.buf_addr, NULL, 10), pmeth->args[1].svalue.len_used, (const Callin_char_t *) pmeth->args[1].svalue.buf_addr);
             continue;
          }
       }
@@ -5080,7 +6225,7 @@ int mg_class_reference(DBXMETH *pmeth, short context)
 
 int mg_function_reference(DBXMETH *pmeth, DBXFUN *pfun)
 {
-   int n, rc, len, dsort, dtype;
+   int n, rc, len, len16, dsort, dtype;
    unsigned int ne;
    DBXCON *pcon = pmeth->pcon;
 
@@ -5101,6 +6246,26 @@ int mg_function_reference(DBXMETH *pmeth, DBXFUN *pfun)
       pmeth->args[pmeth->argc].svalue.len_alloc = len;
       pmeth->args[pmeth->argc].svalue.buf_addr = (char *) (pmeth->input_str.buf_addr + pmeth->offset);
       pmeth->offset += len;
+
+      if (pmeth->pcon && pmeth->pcon->utf16) { /* v1.5.20 */
+
+         pmeth->args[pmeth->argc].svalue16.buf_addr = (pmeth->input_str16.buf_addr + pmeth->input_str16.len_used);
+         len16 = (int) mg_utf8_to_utf16((unsigned short *) pmeth->args[pmeth->argc].svalue16.buf_addr, (size_t) pmeth->input_str16.len_alloc, (char *) pmeth->args[pmeth->argc].svalue.buf_addr, (size_t) len);
+         pmeth->args[pmeth->argc].svalue16.len_used = len16;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16] = 0;
+         pmeth->args[pmeth->argc].svalue16.buf_addr[len16 + 1] = 0;
+         pmeth->input_str16.len_used += (len16 + 2);
+/*
+         {
+            int n;
+            printf("\r\nmg_function_reference Unicode argument %d; len=%d : ", pmeth->argc, pmeth->args[pmeth->argc].svalue16.len_used);
+            for (n = 0; n < pmeth->args[pmeth->argc].svalue16.len_used; n ++) {
+               printf(" %u", pmeth->args[pmeth->argc].svalue16.buf_addr[n]);
+            }
+         }
+*/
+      }
+
       n = pmeth->argc;
       pmeth->argc ++;
       if (pmeth->argc > (DBX_MAXARGS - 1)) {
@@ -5119,7 +6284,7 @@ int mg_function_reference(DBXMETH *pmeth, DBXFUN *pfun)
          pfun->buffer[pmeth->args[n].svalue.len_used] = '\0';
          pfun->label = pfun->buffer;
          pfun->routine = strstr(pfun->buffer, "^");
-         *pfun->routine = '\0';
+         *(pfun->routine) = '\0';
          pfun->routine ++;
          pfun->label_len = (int) strlen(pfun->label);
          pfun->routine_len = (int) strlen(pfun->routine);
@@ -5142,17 +6307,39 @@ int mg_function_reference(DBXMETH *pmeth, DBXFUN *pfun)
          }
          else {
             if (pmeth->args[n].svalue.len_used < DBX_MAXSIZE) {
-               rc = pcon->p_isc_so->p_CachePushStr(pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
+               rc = pcon->utf16 ? pcon->p_isc_so->p_CachePushStrW(pmeth->args[n].svalue16.len_used, (unsigned short *) pmeth->args[n].svalue16.buf_addr) : pcon->p_isc_so->p_CachePushStr(pmeth->args[n].svalue.len_used, (Callin_char_t *) pmeth->args[n].svalue.buf_addr);
             }
             else {
-               pmeth->args[n].cvalue.pstr = (void *) pcon->p_isc_so->p_CacheExStrNew((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr), pmeth->args[n].svalue.len_used + 1);
-               for (ne = 0; ne < pmeth->args[n].svalue.len_used; ne ++) {
-                  pmeth->args[n].cvalue.zstr.str.ch[ne] = (char) pmeth->args[n].svalue.buf_addr[ne];
-               }
-               pmeth->args[n].cvalue.zstr.str.ch[ne] = (char) 0;
-               pmeth->args[n].cvalue.zstr.len = pmeth->args[n].svalue.len_used;
+               if (pcon->utf16) {
+                  pmeth->args[n].cvalue.pstr = (void *) pcon->p_isc_so->p_CacheExStrNewW((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr), pmeth->args[n].svalue16.len_used + 1);
+                  if (pmeth->args[n].cvalue.pstr) {
+                     for (ne = 0; ne < pmeth->args[n].svalue16.len_used; ne ++) {
+                        pmeth->args[n].cvalue.zstr.str.wch[ne] = (unsigned short) pmeth->args[n].svalue16.buf_addr[ne];
+                     }
+                     pmeth->args[n].cvalue.zstr.str.wch[ne] = (char) 0;
+                     pmeth->args[n].cvalue.zstr.len = pmeth->args[n].svalue16.len_used;
 
-               rc = pcon->p_isc_so->p_CachePushExStr((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr));
+                     rc = pcon->p_isc_so->p_CachePushExStrW((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr));
+                  }
+                  else {
+                     rc = CACHE_FAILURE;
+                  }
+               }
+               else {
+                  pmeth->args[n].cvalue.pstr = (void *) pcon->p_isc_so->p_CacheExStrNew((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr), pmeth->args[n].svalue.len_used + 1);
+                  if (pmeth->args[n].cvalue.pstr) {
+                     for (ne = 0; ne < pmeth->args[n].svalue.len_used; ne ++) {
+                        pmeth->args[n].cvalue.zstr.str.ch[ne] = (char) pmeth->args[n].svalue.buf_addr[ne];
+                     }
+                     pmeth->args[n].cvalue.zstr.str.ch[ne] = (char) 0;
+                     pmeth->args[n].cvalue.zstr.len = pmeth->args[n].svalue.len_used;
+
+                     rc = pcon->p_isc_so->p_CachePushExStr((CACHE_EXSTRP) &(pmeth->args[n].cvalue.zstr));
+                  }
+                  else {
+                     rc = CACHE_FAILURE;
+                  }
+               }
             }
          }
       }
@@ -5161,7 +6348,302 @@ int mg_function_reference(DBXMETH *pmeth, DBXFUN *pfun)
       }
    }
 
+   if (!strncmp(pfun->label, "sql", 3) && !strcmp(pfun->routine, "%zmgsis")) { /* v1.5.20 result is already utf8 encoded */
+      pcon->utf16 = 0;
+   }
+
    return rc;
+}
+
+/* v1.4.18 */
+int mg_parse_global_reference(DBXMETH *pmeth, DBXVAL *output_val, char *global_ref, int global_ref_len)
+{
+   int n, nq, keyn;
+   unsigned int len;
+   char *p, *p1, *pc, *pc0;
+
+#ifdef _WIN32
+__try {
+#endif
+
+   keyn = 0;
+   if (global_ref_len == 0) {
+      global_ref_len = (int) strlen(global_ref);
+      if (global_ref_len == 0) {
+         mg_add_block_size(&(output_val->svalue), output_val->offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+         output_val->offset += 5;
+         return keyn;
+      }
+   }
+
+   if (global_ref[global_ref_len - 1] == ')') {
+      global_ref_len --;
+      global_ref[global_ref_len] = '\0';
+   }
+   p = (char *) strstr((char *) global_ref, "(");
+   if (!p) { /* root node; no keys */
+      mg_add_block_size(&(output_val->svalue), output_val->offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+      output_val->offset += 5;
+      return keyn;
+   }
+
+   p ++;
+
+   pc = NULL;
+   for (;;) {
+
+      pc0 = p;
+      while (pc0) {
+         pc = strstr(pc0, ",");
+         if (pc) {
+            *pc = '\0';
+            nq = 0;
+            p1 = p;
+            while (*p1) {
+               if (*p1 == '\"')
+                  nq ++;
+               p1 ++;
+            }
+            *pc = ',';
+            if ((nq % 2) == 0) {
+               break;
+            }
+            else {
+               pc0 = (pc + 1);
+            }
+         }
+         else {
+            break;
+         }
+      }
+      if (pc) {
+         *pc = '\0';
+      }
+
+      if (*p == '\"') {
+         char *p1, *p2;
+         p ++;
+         p1 = p;
+         p2 = p;
+         while (*p1) {
+            if (*p1 == '\"') {
+               len = 0;
+               while (*p1 == '\"') {
+                  len ++;
+                  p1 ++;
+               }
+               len = len / 2;
+               for (n = 0; n < (int) len; n ++) {
+                  *(p2++) = '\"';
+               }
+            }
+            else
+               *(p2 ++) = *(p1 ++);
+
+         }
+         *(p2++) = '\0';
+      }
+
+      len = (unsigned int) strlen(p);
+      mg_add_block_size(&(output_val->svalue), output_val->offset, (unsigned long) len, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+      output_val->offset += 5;
+      memcpy((void *) (output_val->svalue.buf_addr + output_val->offset), (void *) p, (size_t) len);
+      output_val->offset += len;
+      keyn ++;
+
+      if (pc)
+         p = (pc + 1);
+      else
+         break;
+   }
+
+   return keyn;
+
+#ifdef _WIN32
+}
+__except (EXCEPTION_EXECUTE_HANDLER) {
+
+   DWORD code;
+   char bufferx[256];
+
+   __try {
+      code = GetExceptionCode();
+      sprintf_s(bufferx, 255, "Exception caught in f:mg_parse_global_reference: %x", code);
+      mg_log_event(pmeth->pcon->p_log, bufferx, "Error Condition", 0);
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      ;
+   }
+
+   return 0;
+}
+#endif
+}
+
+
+int mg_parse_global_reference16(DBXMETH *pmeth, DBXVAL *output_val, unsigned short *global_ref, int global_ref_len)
+{
+   int n, nq, keyn;
+   unsigned int len;
+   unsigned short *pf, *p, *p1, *pc, *pc0;
+
+#ifdef _WIN32
+__try {
+#endif
+/*
+   for (n = 0; n < global_ref_len; n ++) {
+      printf("\r\n n=%d; c=%c %d;", n, (char) global_ref[n], global_ref[n]);
+   }
+*/
+
+   keyn = 0;
+   if (global_ref_len == 0) {
+      mg_add_block_size(&(output_val->svalue), output_val->offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+      output_val->offset += 5;
+      return keyn;
+   }
+   /* (==40 )==41 ,==44 "==34 */
+   if (global_ref[global_ref_len - 1] == 41) {
+      global_ref_len --;
+      global_ref[global_ref_len] = 0;
+   }
+
+   p = NULL;
+   pf = global_ref;
+   while (*pf != 0) {
+      if (*pf == 40) { /* ( */
+         p = pf;
+         break;
+      }
+      pf ++;
+   }
+   /* p = (char *) strstr((char *) global_ref, "("); */
+   if (!p) { /* root node; no keys */
+      mg_add_block_size(&(output_val->svalue), output_val->offset, (unsigned long) 0, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+      output_val->offset += 5;
+      return 0;
+   }
+
+   p ++;
+
+   pc = NULL;
+   for (;;) {
+
+      pc0 = p;
+      while (pc0) {
+
+         pc = NULL;
+         pf = pc0;
+         while (*pf != 0) {
+            if (*pf == 44) { /* , */
+               pc = pf;
+               break;
+            }
+            pf ++;
+         }
+         /* pc = strstr(pc0, ","); */
+
+         if (pc) {
+            *pc = 0;
+            nq = 0;
+            p1 = p;
+            while (*p1) {
+               if (*p1 == 34) /* " */
+                  nq ++;
+               p1 ++;
+            }
+            *pc = 34; /* " */
+            if ((nq % 2) == 0) {
+               break;
+            }
+            else {
+               pc0 = (pc + 1);
+            }
+         }
+         else {
+            break;
+         }
+      }
+      if (pc) {
+         *pc = 0;
+      }
+
+      if (*p == 34) { /* " */
+         unsigned short *p1, *p2;
+         p ++;
+         p1 = p;
+         p2 = p;
+         while (*p1) {
+            if (*p1 == 34) { /* " */
+               len = 0;
+               while (*p1 == 34) { /* " */
+                  len ++;
+                  p1 ++;
+               }
+               len = len / 2;
+               for (n = 0; n < (int) len; n ++) {
+                  *(p2 ++) = 34; /* " */
+               }
+            }
+            else
+               *(p2 ++) = *(p1 ++);
+
+         }
+         *(p2++) = 0;
+      }
+
+      pf = p;
+      len = 0;
+      while (*pf) {
+         len ++;
+         pf ++;
+      }
+/*
+      for (n = 0; n < 5; n ++) {
+         printf("\r\n pqr->keyn=%d; len=%d; n=%d; c=%c %d;", pqr->keyn, len, n, (char) p[n], p[n]);
+      }
+*/
+      /* len = (unsigned int) strlen(p); */
+/*
+      T_MEMCPY((void *) pqr->keys[pqr->keyn].cvalue.buf16_addr, (void *) p, (size_t) len * sizeof(short));
+      pqr->keys[pqr->keyn].cvalue.buf16_addr[len] = 0;
+      pqr->keys[pqr->keyn].cvalue.len_used = len;
+      pqr->keyn ++;
+*/
+      /* TODO convert to utf8 */
+      mg_add_block_size(&(output_val->svalue), output_val->offset, (unsigned long) len, DBX_DSORT_DATA, DBX_DTYPE_DBXSTR);
+      output_val->offset += 5;
+      memcpy((void *) (output_val->svalue.buf_addr + output_val->offset), (void *) p, (size_t) len);
+      output_val->offset += len;
+      keyn ++;
+
+      if (pc)
+         p = (pc + 1);
+      else
+         break;
+   }
+
+   return keyn;
+
+#ifdef _WIN32
+}
+__except (EXCEPTION_EXECUTE_HANDLER) {
+
+   DWORD code;
+   char bufferx[256];
+
+   __try {
+      code = GetExceptionCode();
+      sprintf_s(bufferx, 255, "Exception caught in f:mg_parse_global_reference16: %x", code);
+      mg_log_event(pmeth->pcon->p_log, bufferx, "Error Condition", 0);
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      ;
+   }
+
+   return 0;
+}
+#endif
 }
 
 
@@ -6719,9 +8201,11 @@ int netx_tcp_connect(DBXCON *pcon, int context)
 int netx_tcp_handshake(DBXCON *pcon, int context)
 {
    int len;
+   char *p;
    char buffer[256];
 
-   sprintf(buffer, "dbx1~%s\n", pcon->nspace);
+   /* v1.4.18 */
+   sprintf(buffer, "dbx1~%s~2\n", pcon->nspace);
    len = (int) strlen(buffer);
 
    netx_tcp_write(pcon, (unsigned char *) buffer, len);
@@ -6730,11 +8214,34 @@ int netx_tcp_handshake(DBXCON *pcon, int context)
    len = mg_get_size((unsigned char *) buffer);
 
    netx_tcp_read(pcon, (unsigned char *) buffer, len, pcon->timeout, 1); /* v1.2.8 */
-   if (pcon->dbtype != DBX_DBTYPE_YOTTADB) {
-      isc_parse_zv(buffer, pcon->p_zv);
+
+   if (!strncmp(buffer, "Node.js", 7)) { /* v1.5.21 We're talking to JS Proxy */ 
+      pcon->dbtype = DBX_DBTYPE_JSPROXY;
+      pcon->p_zv->majorversion = 0;
+      pcon->p_zv->minorversion = 0;
+      pcon->p_zv->mg_build = 0;
+      p = strstr(buffer, "v");
+      if (p) {
+         pcon->p_zv->majorversion = (int) strtol(p + 1, NULL, 10);
+         p = strstr(p, ".");
+         if (p) {
+            pcon->p_zv->minorversion = (int) strtol(p + 1, NULL, 10);
+            p ++;
+            p = strstr(p, ".");
+            if (p) {
+               pcon->p_zv->mg_build = (int) strtol(p + 1, NULL, 10);
+            }
+         }
+      }
+      sprintf(pcon->p_zv->version, "%d.%d.%d", pcon->p_zv->majorversion, pcon->p_zv->minorversion, pcon->p_zv->mg_build);
    }
    else {
-     ydb_parse_zv(buffer, pcon->p_zv);
+      if (pcon->dbtype != DBX_DBTYPE_YOTTADB) {
+         isc_parse_zv(buffer, pcon->p_zv);
+      }
+      else {
+         ydb_parse_zv(buffer, pcon->p_zv);
+      }
    }
 
    return 0;
@@ -6773,6 +8280,10 @@ int netx_tcp_command(DBXMETH *pmeth, int context)
    rc = CACHE_SUCCESS;
    if (pcon->p_srv) {
       return mg_db_command(pmeth, context);
+   }
+
+   if (pcon->utf16) { /* v1.5.20 */
+      pmeth->input_str.buf_addr[9] = 255;
    }
 
    netx_tcp_write(pcon, (unsigned char *) pmeth->input_str.buf_addr, pmeth->input_str.len_used);
@@ -7088,7 +8599,6 @@ int netx_tcp_read(DBXCON *pcon, unsigned char *data, int size, int timeout, int 
          break;
       }
    }
-
    if (len) {
       result = len;
    }
@@ -7685,6 +9195,7 @@ int mg_db_connect(MGSRV *p_srv, int *p_chndle, short context)
 
    pcon->use_db_mutex = 0; /* v1.3.12 */
    pcon->tlevel = 0;
+   pcon->utf16 = 0; /* v1.5.20 */
    pcon->p_isc_so = NULL;
    pcon->p_ydb_so = NULL;
    pcon->p_srv = p_srv;
@@ -8456,6 +9967,7 @@ int mg_bind_server_api(MGSRV *p_srv, short context)
    pmeth->pcon = pcon;
 
    pcon->tlevel = 0;
+   pcon->utf16 = 0; /* v1.5.20 */
    pcon->p_isc_so = NULL;
    pcon->p_ydb_so = NULL;
    pcon->p_gtm_so = NULL;
@@ -8854,3 +10366,155 @@ mg_invoke_server_api_exit:
    return result;
 }
 
+
+/* v1.5.20 */
+
+/* conversions without error checking
+   only works for valid UTF-8, i.e. no 5- or 6-byte sequences
+   srcsz = source size in bytes
+   sz = dest size in # of wide characters
+   returns # characters converted
+   if sz == srcsz+1 (i.e. 4*srcsz+4 bytes), there will always be enough space.
+*/
+
+size_t mg_utf8_to_utf16(unsigned short *dest, size_t sz, const char *src, size_t srcsz)
+{
+   unsigned short ch;
+   const char *src_end;
+   size_t i, nb;
+
+   i = 0;
+   src_end = src + srcsz;
+
+   if (sz == 0 || srcsz == 0)
+      return 0;
+
+   while (i < sz) {
+      if (!dbx_isutf(*src)) { /* invalid sequence */
+         dest[i++] = 0xFFFD;
+         src ++;
+         if (src >= src_end)
+            break;
+         continue;
+      }
+      nb = dbx_trailing_bytes_for_utf8[(unsigned char) *src];
+      if (src + nb >= src_end)
+         break;
+      ch = 0;
+/*
+      switch (nb) {
+         case 5: ch += (unsigned char) *src ++; ch <<= 6;
+         case 4: ch += (unsigned char) *src ++; ch <<= 6;
+         case 3: ch += (unsigned char) *src ++; ch <<= 6;
+         case 2: ch += (unsigned char) *src ++; ch <<= 6;
+         case 1: ch += (unsigned char) *src ++; ch <<= 6;
+         case 0: ch += (unsigned char) *src ++;
+      }
+*/
+
+      if (nb == 5) {
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+      }
+      else if (nb == 4) {
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+      }
+      else if (nb == 3) {
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+      }
+      else if (nb == 2) {
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+      }
+      else if (nb == 1) {
+         ch += (unsigned char) *src ++;
+         ch <<= 6;
+         ch += (unsigned char) *src ++;
+      }
+      else if (nb == 0) {
+         ch += (unsigned char) *src ++;
+      }
+
+      ch -= dbx_offsets_from_utf8[nb];
+      dest[i ++] = ch;
+   }
+   return i;
+}
+
+
+/* srcsz = number of source characters
+   sz = size of dest buffer in bytes
+   returns # bytes stored in dest
+   the destination string will never be bigger than the source string.
+*/
+
+size_t mg_utf16_to_utf8(char *dest, size_t sz, const unsigned short *src, size_t srcsz)
+{
+   unsigned short ch;
+   size_t i;
+   char *dest0, *dest_end;
+
+   i = 0;
+   dest0 = dest;
+   dest_end = dest + sz;
+
+   while (i < srcsz) {
+      ch = src[i];
+      if (ch < 0x80) {
+         if (dest >= dest_end)
+            break;
+         *dest ++ = (char) ch;
+      }
+      else if (ch < 0x800) {
+         if (dest >= dest_end - 1)
+            break;
+          *dest ++ = (ch >> 6) | 0xC0;
+          *dest ++ = (ch & 0x3F) | 0x80;
+       }
+       else if (ch < 0x10000) {
+          if (dest >= dest_end - 2)
+            break;
+          *dest ++ = (ch >> 12) | 0xE0;
+          *dest ++ = ((ch >> 6) & 0x3F) | 0x80;
+          *dest ++ = (ch & 0x3F) | 0x80;
+       }
+/*
+       else if (ch < 0x110000) {
+         if (dest >= dest_end - 3)
+            break;
+         *dest ++ = (ch >> 18) | 0xF0;
+         *dest ++ = ((ch >> 12) & 0x3F) | 0x80;
+         *dest ++ = ((ch >> 6) & 0x3F) | 0x80;
+         *dest ++ = (ch & 0x3F) | 0x80;
+      }
+*/
+      i ++;
+   }
+   return (dest - dest0);
+}

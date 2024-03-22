@@ -4,7 +4,7 @@
    | Description: PHP Extension for M/Cache/IRIS                              |
    | Author:      Chris Munt cmunt@mgateway.com                               |
    |                         chris.e.munt@gmail.com                           |
-   | Copyright (c) 2019-2023 MGateway Ltd                                     |
+   | Copyright (c) 2019-2024 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -152,6 +152,11 @@ Version 3.3.60 26 March 2023:
 
 Version 3.3.60a 23 June 2023:
    Documentation update.
+
+Version 3.3.61 22 March 2024:
+   Correct a fault in the m_proc_byref() and m_method_byref() functions.
+	   It remains the case that the first two arguments to these functions are passed by value (DB Server name and M function name)
+      but subsequent arguments are passed by reference.
 
 */
 
@@ -3541,10 +3546,9 @@ ZEND_FUNCTION(m_proc_byref)
    int argument_count, offset, argc, n, n1, rn, len, hlen, clen, rlen, size, size0, rec_len;
    char *key, *data, *data0, *parg, *par;
    char stype[4];
-/*
+   zval *parameter_array_d[MG_MAXARG]; /* v3.3.61 */
    zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
-*/
-   zval	*parameter_array[MG_MAXARG];
+
    int chndle;
    MGPAGE *p_page;
    MGAREC arec;
@@ -3560,7 +3564,6 @@ ZEND_FUNCTION(m_proc_byref)
 #ifdef _WIN32
 __try {
 #endif
-
    phase = 1;
 
    p_page = MG_PHP_GLOBAL(p_page);
@@ -3581,11 +3584,19 @@ __try {
    if (argument_count < 1)
       MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
 
+   /* v3.3.61 */
    /* argument count is correct, now retrieve arguments */
-
-   n = mg_get_input_arguments(argument_count, parameter_array);
-   if (n == FAILURE) {
+   if(zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS) {
       MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+   }
+
+   /* v3.3.61 */
+   for (n = 0; n < argument_count; n ++) {
+      parameter_array_d[n] = &parameter_array_a[n];
+      ZVAL_DEREF(parameter_array_d[n]);
+      if (Z_TYPE_P(parameter_array_d[n]) == IS_ARRAY) {
+         SEPARATE_ARRAY(parameter_array_d[n]);
+      }
    }
 
    phase = 4;
@@ -3612,7 +3623,7 @@ m_proc_byref_retry:
 
    phase = 5;
 
-   offset = mg_request_header_ex(p_page, p_buf, "X", MG_PRODUCT, parameter_array[0]);
+   offset = mg_request_header_ex(p_page, p_buf, "X", MG_PRODUCT, &(parameter_array[0]));
 
    phase = 6;
 
@@ -3626,16 +3637,16 @@ m_proc_byref_retry:
          byref = 0;
       }
 
-      if (Z_TYPE_P(parameter_array[n]) == IS_ARRAY) {
+      if (Z_TYPE_P(parameter_array_d[n]) == IS_ARRAY) {
          /* zend_printf("\r\narg %d is array byref=%d", n, byref); */
-         rc = mg_array_parse(p_page, chndle, parameter_array[n], p_buf, 0, byref);
+         rc = mg_array_parse(p_page, chndle, parameter_array_d[n], p_buf, 0, byref);
          if (!rc) {
             break;
          }
       }
       else {
          /* zend_printf("\r\narg %d is string byref=%d", n, byref); */
-         data = mg_get_string(parameter_array[n], NULL, &len);
+         data = mg_get_string(&(parameter_array[n]), NULL, &len);
          mg_request_add(p_page->p_srv, chndle, p_buf, data, len, byref, MG_TX_DATA);
       }
    }
@@ -3689,7 +3700,7 @@ m_proc_byref_retry:
    phase = 12;
 
    stop = 0;
-   offset = 2;
+   /* offset = 2; v3.3.61 */
    parg = (p_buf->p_buffer + MG_RECV_HEAD);
 
    clen = mg_decode_size(p_buf->p_buffer, 5, MG_CHUNK_SIZE_BASE);
@@ -3702,7 +3713,6 @@ m_proc_byref_retry:
       size0 = p_buf->data_size - MG_RECV_HEAD;
    }
    else {
-
       rlen = 0;
       argc = 0;
       anybyref = 0;
@@ -3712,6 +3722,7 @@ m_proc_byref_retry:
          if ((hlen + size + rlen) > clen) {
             break;
          }
+
          parg += hlen;
          rlen += hlen;
          if (!n) {
@@ -3732,6 +3743,7 @@ m_proc_byref_retry:
                   stop = 1;
                   break;
                }
+
                if (type == MG_TX_EOD) {
                   parg += (hlen + size);
                   rlen += (hlen + size);
@@ -3749,7 +3761,8 @@ m_proc_byref_retry:
 
                   if (argc >= offset && (argc - offset) < argument_count) {
                      anybyref = 1;
-                     mg_array_add_record(parameter_array[argc - offset], &arec, 0);
+                     /* v3.3.61 */
+                     mg_array_add_record(parameter_array_d[argc - offset], &arec, 0);
                   }
                   arec.kn = 0;
                   par = parg;
@@ -3772,7 +3785,7 @@ m_proc_byref_retry:
                c = *(parg + size);
                *(parg + size) = '\0';
 
-               ZVAL_STRING(parameter_array[argc - offset], parg);
+               ZVAL_STRING(parameter_array_d[argc - offset], parg);
 
                *(parg + size) = c;
 
@@ -4010,10 +4023,8 @@ ZEND_FUNCTION(m_method_byref)
    int rc, argument_count, offset, argc, n, n1, rn, len, hlen, clen, rlen, size, size0, rec_len;
    char *key, *data, *data0, *parg, *par;
    char stype[4];
-/*
+   zval *parameter_array_d[MG_MAXARG]; /* v3.3.61 */
    zval	parameter_array_a[MG_MAXARG] = {0}, *parameter_array = parameter_array_a;
-*/
-   zval	*parameter_array[MG_MAXARG];
    int chndle;
    MGPAGE *p_page;
    MGAREC arec;
@@ -4033,11 +4044,19 @@ ZEND_FUNCTION(m_method_byref)
    if (argument_count < 1)
       MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
 
+   /* v3.3.61 */
    /* argument count is correct, now retrieve arguments */
-
-   n = mg_get_input_arguments(argument_count, parameter_array);
-   if (n == FAILURE) {
+   if(zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS) {
       MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
+   }
+
+   /* v3.3.61 */
+   for (n = 0; n < argument_count; n ++) {
+      parameter_array_d[n] = &parameter_array_a[n];
+      ZVAL_DEREF(parameter_array_d[n]);
+      if (Z_TYPE_P(parameter_array_d[n]) == IS_ARRAY) {
+         SEPARATE_ARRAY(parameter_array_d[n]);
+      }
    }
 
    n = mg_db_connect(p_page->p_srv, &chndle, 1);
@@ -4045,7 +4064,7 @@ ZEND_FUNCTION(m_method_byref)
       MG_ERROR1(p_page->p_srv->error_mess);
    }
 
-   offset = mg_request_header_ex(p_page, p_buf, "x", MG_PRODUCT, parameter_array[0]);
+   offset = mg_request_header_ex(p_page, p_buf, "x", MG_PRODUCT, &(parameter_array[0]));
 
    rc = 1;
    for (n = offset; n < argument_count; n ++) {
@@ -4057,20 +4076,16 @@ ZEND_FUNCTION(m_method_byref)
          byref = 0;
       }
 
-      if (Z_TYPE_P(parameter_array[n]) == IS_ARRAY) {
-/*
-         zend_printf("\r\narg %d is array byref=%d", n, byref);
-*/
-         rc = mg_array_parse(p_page, chndle, parameter_array[n], p_buf, 0, byref);
+      if (Z_TYPE_P(parameter_array_d[n]) == IS_ARRAY) {
+         /* zend_printf("\r\narg %d is array byref=%d", n, byref); */
+         rc = mg_array_parse(p_page, chndle, parameter_array_d[n], p_buf, 0, byref);
          if (!rc) {
             break;
          }
       }
       else {
-/*
-         zend_printf("\r\narg %d is string byref=%d", n, byref);
-*/
-         data = mg_get_string(parameter_array[n], NULL, &len);
+         /* zend_printf("\r\narg %d is string byref=%d", n, byref); */
+         data = mg_get_string(&(parameter_array[n]), NULL, &len);
          mg_request_add(p_page->p_srv, chndle, p_buf, data, len, byref, MG_TX_DATA);
       }
    }
@@ -4104,7 +4119,7 @@ ZEND_FUNCTION(m_method_byref)
    data = p_buf->p_buffer + MG_RECV_HEAD;
 
    stop = 0;
-   offset = 2;
+   /* offset = 2; v3.3.61 */
    parg = (p_buf->p_buffer + MG_RECV_HEAD);
 
    clen = mg_decode_size(p_buf->p_buffer, 5, MG_CHUNK_SIZE_BASE);
@@ -4165,7 +4180,8 @@ ZEND_FUNCTION(m_method_byref)
 
                   if (argc >= offset && (argc - offset) < argument_count) {
                      anybyref = 1;
-                     mg_array_add_record((zval *) &(parameter_array[argc - offset]), &arec, 0);
+                     /* v3.3.61 */
+                     mg_array_add_record((zval *) parameter_array_d[argc - offset], &arec, 0);
                   }
 
                   arec.kn = 0;
@@ -4189,7 +4205,7 @@ ZEND_FUNCTION(m_method_byref)
                anybyref = 1;
                c = *(parg + size);
                *(parg + size) = '\0';
-               ZVAL_STRING(parameter_array[argc - offset], parg);
+               ZVAL_STRING(parameter_array_d[argc - offset], parg);
                *(parg + size) = c;
             }
 
@@ -4352,6 +4368,7 @@ ZEND_FUNCTION(m_merge_from_db)
    if(zend_get_parameters_array_ex(argument_count, parameter_array) != SUCCESS)
       MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
 
+   /* v3.3.61 */
    for (n = 0; n < argument_count; n ++) {
       parameter_array_d[n] = &parameter_array_a[n];
       ZVAL_DEREF(parameter_array_d[n]);
@@ -4359,6 +4376,7 @@ ZEND_FUNCTION(m_merge_from_db)
          SEPARATE_ARRAY(parameter_array_d[n]);
       }
    }
+
    if (Z_TYPE_P(parameter_array_d[argument_count - 1]) != IS_STRING) {
       strcpy(p_page->p_srv->error_mess, "The last (options) argument to the 'm_merge_from_db()' function must be a string");
       MG_ERROR1(p_page->p_srv->error_mess);
@@ -4805,9 +4823,7 @@ int mg_array_add_record(zval *ppa, MGAREC * p_arec, int mode)
    ppk[0] = ppa;
    for (kn = 0; p_arec->krec[kn]; kn ++) {
       if (!p_arec->krec[kn + 1]) {
-
          add_assoc_string(ppk[kn], p_arec->krec[kn], p_arec->vrec);
-
          break;
       }
 
