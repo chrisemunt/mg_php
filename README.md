@@ -3,9 +3,9 @@
 A PHP Extension for InterSystems **Cache/IRIS** and **YottaDB**.
 
 Chris Munt <cmunt@mgateway.com>  
-23 June 2023, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
+22 March 2024, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Current Release: Version: 3.3; Revision 60.
+* Current Release: Version: 3.3; Revision 61.
 * Verified to work with PHP versions up to (and including) v8.2.x.
 * Two connectivity models to the InterSystems or YottaDB database are provided: High performance via the local database API or network based.
 * [Release Notes](#relnotes) can be found at the end of this document.
@@ -124,26 +124,26 @@ Change to your development Namespace and check the installation:
        do ^%zmgsi
 
        MGateway Ltd - Service Integration Gateway
-       Version: 4.5; Revision 28 (3 February 2023)
+       Version: 4.5; Revision 31 (18 November 2023)
 
 
 #### Installation for YottaDB
 
-The instructions given here assume a standard 'out of the box' installation of **YottaDB** (version 1.30) deployed in the following location:
+The instructions given here assume a standard 'out of the box' installation of **YottaDB** (version 1.38) deployed in the following location:
 
-       /usr/local/lib/yottadb/r130
+       /usr/local/lib/yottadb/r138
 
 The primary default location for routines:
 
-       /root/.yottadb/r1.30_x86_64/r
+       /root/.yottadb/r1.38_x86_64/r
 
 Copy all the routines (i.e. all files with an 'm' extension) held in the GitHub **/yottadb** directory to:
 
-       /root/.yottadb/r1.30_x86_64/r
+       /root/.yottadb/r1.38_x86_64/r
 
 Change directory to the following location and start a **YottaDB** command shell:
 
-       cd /usr/local/lib/yottadb/r130
+       cd /usr/local/lib/yottadb/r138
        ./ydb
 
 Link all the **zmgsi** routines and check the installation:
@@ -153,7 +153,7 @@ Link all the **zmgsi** routines and check the installation:
        do ^%zmgsi
 
        MGateway Ltd - Service Integration Gateway
-       Version: 4.5; Revision 28 (3 February 2023)
+       Version: 4.5; Revision 31 (18 November 2023)
 
 Note that the version of **zmgsi** is successfully displayed.
 
@@ -229,7 +229,7 @@ Before invoking database functionality,the following simple script can be used t
 
 This should return something like:
 
-       MGateway Ltd. - mg_php: PHP Gateway to M - Version 3.3.60
+       MGateway Ltd. - mg_php: PHP Gateway to M - Version 3.3.61
 
 ### Connecting the database via the network.
 
@@ -296,7 +296,7 @@ Where:
 
 Example:
 
-This example assumes that the YottaDB installation is in: **/usr/local/lib/yottadb/r130**. 
+This example assumes that the YottaDB installation is in: **/usr/local/lib/yottadb/r138**. 
 This is where the **libyottadb.so** library is found.
 Also, in this directory, as indicated in the environment variables, the YottaDB routine interface file resides (**zmgsi.ci** in this example).  The interface file must contain the following lines:
 
@@ -309,13 +309,13 @@ Moving on to the PHP code for binding to the YottaDB database.  Modify the value
 
        $envvars = "";
        $envvars = $envvars . "ydb_dir=/root/.yottadb\n";
-       $envvars = $envvars . "ydb_rel=r1.30_x86_64\n";
-       $envvars = $envvars . "ydb_gbldir=/root/.yottadb/r1.30_x86_64/g/yottadb.gld\n";
-       $envvars = $envvars . "ydb_routines=/root/.yottadb/r1.30_x86_64/o*(/root/.yottadb/r1.30_x86_64/r root/.yottadb/r) /usr/local/lib/yottadb/r130/libyottadbutil.so\n";
-       $envvars = $envvars . "ydb_ci=/usr/local/lib/yottadb/r130/zmgsi.ci\n";
+       $envvars = $envvars . "ydb_rel=r1.38_x86_64\n";
+       $envvars = $envvars . "ydb_gbldir=/root/.yottadb/r1.38_x86_64/g/yottadb.gld\n";
+       $envvars = $envvars . "ydb_routines=/root/.yottadb/r1.38_x86_64/o*(/root/.yottadb/r1.38_x86_64/r root/.yottadb/r) /usr/local/lib/yottadb/r138/libyottadbutil.so\n";
+       $envvars = $envvars . "ydb_ci=/usr/local/lib/yottadb/r138/zmgsi.ci\n";
        $envvars = $envvars . "\n";
 
-       $result = m_bind_server_api("YottaDB", "/usr/local/lib/yottadb/r130", "", "", envvars, "");
+       $result = m_bind_server_api("YottaDB", "/usr/local/lib/yottadb/r138", "", "", envvars, "");
 
 The bind function will return '1' for success and '0' for failure.
 
@@ -336,7 +336,7 @@ Before invoking database functionality,the following simple script can be used t
 
 This should return something like:
 
-       MGateway Ltd. - mg_php: PHP Gateway to M - Version 3.3.60
+       MGateway Ltd. - mg_php: PHP Gateway to M - Version 3.3.61
 
 Now consider the following database script:
 
@@ -504,7 +504,7 @@ Example (Encode a date to internal storage format):
 
 ## <a name="license">License</a>
 
-Copyright (c) 2018-2023 MGateway Ltd,
+Copyright (c) 2018-2024 MGateway Ltd,
 Surrey UK.                                                      
 All rights reserved.
  
@@ -554,3 +554,9 @@ Unless required by applicable law or agreed to in writing, software distributed 
 ### v3.3.60a (23 June 2023)
 
 * Documentation update.
+
+### v3.3.61 (22 March 2024)
+
+* Correct a fault in the **m\_proc\_byref()** and **m\_method\_byref()** functions.
+	* It remains the case that the first two arguments to these functions are passed by value (DB Server name and M function name) but subsequent arguments are passed by reference.
+
