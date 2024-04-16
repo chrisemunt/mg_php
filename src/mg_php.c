@@ -158,6 +158,9 @@ Version 3.3.61 22 March 2024:
 	   It remains the case that the first two arguments to these functions are passed by value (DB Server name and M function name)
       but subsequent arguments are passed by reference.
 
+Version 3.3.62 16 April 2024:
+   Correct a fault in the management of DB Server connections in multi-process Apache configurations.
+      This fault led web requests failing with 'empty page' errors.
 */
 
 #ifdef HAVE_CONFIG_H
@@ -718,6 +721,8 @@ ZEND_GET_MODULE(mg_php)
 
 static unsigned long request_no  = 0;
 static char minit[256]           = {'\0'};
+/* v3.3.62 */
+static DBXLOG dbxlog             = {MG_LOG_FILE, "", "", 0, 0, 0, 0, 0, "", ""};
 
 int                  mg_type                    (zval *item);
 int                  mg_get_integer             (zval *item);
@@ -766,6 +771,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
  */
 static void php_mg_php_init_globals(zend_mg_php_globals *mg_php_globals)
 {
+#if 0
+   mg_log_event(&dbxlog, "php_mg_php_init_globals", "trace", 0);
+#endif
+
 	mg_php_globals->req_no = 0;
 	mg_php_globals->fun_no = 0;
    *(mg_php_globals->trace) = '\0';
@@ -782,6 +791,10 @@ PHP_MINIT_FUNCTION(mg_php)
    int n;
    time_t now;
    char buffer[256];
+
+#if 0
+   mg_log_event(&dbxlog, "PHP_MINIT_FUNCTION(mg_php)", "trace", 0);
+#endif
 
 #if defined(_WIN32) && !defined(COMPILE_DL_MG_PHP)
    InitializeCriticalSection(&dbx_global_mutex);
@@ -817,6 +830,9 @@ PHP_MINIT_FUNCTION(mg_php)
  */
 PHP_MSHUTDOWN_FUNCTION(mg_php)
 {
+#if 0
+   mg_log_event(&dbxlog, "PHP_MSHUTDOWN_FUNCTION(mg_php)", "trace", 0);
+#endif
 
 #if defined(_WIN32) && !defined(COMPILE_DL_MG_PHP)
    DeleteCriticalSection(&dbx_global_mutex);
@@ -833,6 +849,9 @@ PHP_RINIT_FUNCTION(mg_php)
    int n;
    unsigned long req_no;
 
+#if 0
+   mg_log_event(&dbxlog, "PHP_RINIT_FUNCTION(mg_php)", "trace", 0);
+#endif
    mg_enter_critical_section((void *) &dbx_global_mutex);
    request_no ++;
    req_no = request_no;
@@ -857,6 +876,7 @@ PHP_RINIT_FUNCTION(mg_php)
    MG_PHP_GLOBAL(p_page)->p_srv->storage_mode = 0;
    MG_PHP_GLOBAL(p_page)->p_srv->timeout = 0;
    MG_PHP_GLOBAL(p_page)->p_srv->no_retry = 0;
+   MG_PHP_GLOBAL(p_page)->p_srv->mode = 0; /* v3.3.62 */
 
    strcpy(MG_PHP_GLOBAL(p_page)->p_srv->ip_address, MG_HOST);
    MG_PHP_GLOBAL(p_page)->p_srv->port = MG_DEFAULT_PORT;
@@ -884,10 +904,21 @@ PHP_RSHUTDOWN_FUNCTION(mg_php)
 {
    int n;
 
+#if 0
+   mg_log_event(&dbxlog, "PHP_RSHUTDOWN_FUNCTION(mg_php)", "trace", 0);
+#endif
+
    if (MG_PHP_GLOBAL(p_page) != NULL) {
 
       for (n = 0; n < MG_MAXCON; n ++) {
          if (MG_PHP_GLOBAL(p_page)->p_srv->pcon[n] != NULL) {
+/*
+{
+   char buffer[256];
+   sprintf(buffer, "mg_db_disconnect chndle=%d; mode=%d;", n, MG_PHP_GLOBAL(p_page)->p_srv->mode);
+   mg_log_event(&dbxlog, buffer, "PHP_RSHUTDOWN_FUNCTION(mg_php)", 0);
+}
+*/
             mg_db_disconnect(MG_PHP_GLOBAL(p_page)->p_srv, n, 0);
          }
       }
@@ -903,6 +934,9 @@ PHP_RSHUTDOWN_FUNCTION(mg_php)
  */
 PHP_MINFO_FUNCTION(mg_php)
 {
+#if 0
+   mg_log_event(&dbxlog, "PHP_MINFO_FUNCTION(mg_php)", "trace", 0);
+#endif
 
 	php_info_print_table_start();
 
@@ -1711,6 +1745,10 @@ ZEND_FUNCTION(m_get)
    int chndle;
    MGPAGE *p_page;
 
+#if 0
+   mg_log_event(&dbxlog, "ZEND_FUNCTION(m_get)", "trace", 0);
+#endif
+
    p_page = MG_PHP_GLOBAL(p_page);
 
    p_buf = &mgbuf;
@@ -1730,6 +1768,7 @@ ZEND_FUNCTION(m_get)
       MG_WRONG_PARAM_COUNT_AND_FREE_BUF;
 
    n = mg_db_connect(p_page->p_srv, &chndle, 1);
+
    if (!n) {
       MG_ERROR1(p_page->p_srv->error_mess);
    }
@@ -1744,6 +1783,7 @@ ZEND_FUNCTION(m_get)
    MG_MEMCHECK("Insufficient memory to process request", 1);
 
    n = mg_db_send(p_page->p_srv, chndle, p_buf, 1);
+
    if (!n) {
       MG_ERROR1(p_page->p_srv->error_mess);
    }

@@ -108,6 +108,11 @@ Version 1.5.21 12 March 2024:
 
 Version 1.5.22 19 March 2024:
    Support the M merge command using API functions provided by YottaDB (rather than M code).
+
+Version 1.5.23 16 April 2024:
+   Ensure that the connection mode is correctly set in the legacy open and release connection functions.
+   Ensure that connection allocation is adequately protected in the legacy open and release connection functions.
+      mg_db_connect() and mg_db_disconnect()
 */
 
 
@@ -119,7 +124,7 @@ extern int errno;
 #endif
 
 static NETXSOCK      netx_so        = {0, 0, 0, 0, 0, 0, 0, {'\0'}};
-static DBXCON *      connection[DBX_MAXCONS];
+static DBXCON *      connection[DBX_MAXCONS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 #define dbx_isutf(c) (((c)&0xC0) != 0x80)
 
@@ -320,10 +325,6 @@ DBX_EXTFUN(int) dbx_open(unsigned char *input, unsigned char *output)
 
    mg_unpack_header(input, output);
    mg_unpack_arguments(pmeth);
-/*
-   printf("\ndbx_open : pcon->p_isc_so->libdir=%s; pcon->p_isc_so->libnam=%s; pcon->p_isc_so->loaded=%d; pcon->p_isc_so->functions_enabled=%d; pcon->p_isc_so->merge_enabled=%d;\n", pcon->p_isc_so->libdir, pcon->p_isc_so->libnam, pcon->p_isc_so->loaded, pcon->p_isc_so->functions_enabled, pcon->p_isc_so->merge_enabled);
-   printf("\ndbx_open : pcon->p_ydb_so->loaded=%d;\n", pcon->p_ydb_so->loaded);
-*/
 
    pcon->pid = 0;
    pcon->dbtype = 0;
@@ -5861,6 +5862,7 @@ int mg_unpack_arguments(DBXMETH *pmeth)
 {
    int len, len16, dsort, dtype;
    char buffer[32];
+
    for (;;) {
       len = (int) mg_get_block_size(&(pmeth->input_str), pmeth->offset, &dsort, &dtype);
       pmeth->offset += 5;
@@ -9142,12 +9144,14 @@ int mg_db_connect(MGSRV *p_srv, int *p_chndle, short context)
    DBXCON *pcon;
    DBXMETH *pmeth;
 
-   if (p_srv->mode == 2) {
+   if (p_srv->mode == 2) { /* API based connection */
       return 1;
    }
+   p_srv->mode = 1; /* v1.5.23 network based connection */
 
    free = -1;
    *p_chndle = -1;
+   mg_enter_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
    for (n = 0; n < MG_MAXCON; n ++) {
       if (connection[n]) {
          if (!connection[n]->in_use) {
@@ -9165,11 +9169,13 @@ int mg_db_connect(MGSRV *p_srv, int *p_chndle, short context)
    }
 
    if (*p_chndle != -1) {
+      mg_leave_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
       p_srv->pcon[*p_chndle] = connection[*p_chndle];
       return 1;
    }
 
    if (free == -1) {
+      mg_leave_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
       return 0;
    }
 
@@ -9177,11 +9183,13 @@ int mg_db_connect(MGSRV *p_srv, int *p_chndle, short context)
 
    pcon = (PDBXCON) mg_malloc(sizeof(DBXCON), 0);
    if (pcon == NULL) {
+      mg_leave_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
       return 0;
    }
    memset((void *) pcon, 0, sizeof(DBXCON));
    pmeth = (PDBXMETH) mg_malloc(sizeof(DBXMETH), 0);
    if (pmeth == NULL) {
+      mg_leave_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
       mg_free((void *) pcon, 0);
       return 0;
    }
@@ -9190,6 +9198,9 @@ int mg_db_connect(MGSRV *p_srv, int *p_chndle, short context)
    pmeth->pcon = pcon;
 
    connection[*p_chndle] = pcon;
+
+   mg_leave_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
+
    pcon->chndle = *p_chndle;
    p_srv->pcon[*p_chndle] = connection[*p_chndle];
 
@@ -9260,8 +9271,11 @@ int mg_db_disconnect(MGSRV *p_srv, int chndle, short context)
    close(pcon->cli_socket);
 #endif
 
+   mg_enter_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
    mg_free((void *) p_srv->pcon[chndle], 0);
    p_srv->pcon[chndle] = NULL;
+   connection[chndle] = NULL; /* v1.5.23 */
+   mg_leave_critical_section((void *) &dbx_global_mutex); /* v1.5.23 */
 
    return 1;
 }
