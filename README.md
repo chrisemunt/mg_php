@@ -3,9 +3,9 @@
 A PHP Extension for InterSystems **Cache/IRIS** and **YottaDB**.
 
 Chris Munt <cmunt@mgateway.com>  
-22 March 2024, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
+16 April 2024, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Current Release: Version: 3.3; Revision 61.
+* Current Release: Version: 3.3; Revision 62.
 * Verified to work with PHP versions up to (and including) v8.2.x.
 * Two connectivity models to the InterSystems or YottaDB database are provided: High performance via the local database API or network based.
 * [Release Notes](#relnotes) can be found at the end of this document.
@@ -559,4 +559,10 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 * Correct a fault in the **m\_proc\_byref()** and **m\_method\_byref()** functions.
 	* It remains the case that the first two arguments to these functions are passed by value (DB Server name and M function name) but subsequent arguments are passed by reference.
+
+### v3.3.62 (16 April 2024)
+
+* Correct a fault in the management of DB Server connections in multi-process Apache configurations.
+	* This fault led web requests failing with 'empty page' errors.
+
 
